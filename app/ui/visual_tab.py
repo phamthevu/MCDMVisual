@@ -58,7 +58,7 @@ class VisualTab(QWidget):
         self.sp_topk = QSpinBox(); self.sp_topk.setRange(0, 1000); self.sp_topk.setSpecialValueText("All"); self.sp_topk.valueChanged.connect(self.refresh_from_state)
         self.sp_topn = QSpinBox(); self.sp_topn.setRange(0, 9999); self.sp_topn.setSpecialValueText("All"); self.sp_topn.valueChanged.connect(self.refresh_from_state)
         self.sp_nodes = QSpinBox(); self.sp_nodes.setRange(4, 40); self.sp_nodes.setValue(14); self.sp_nodes.valueChanged.connect(self.refresh_from_state)
-        self.sp_head = QSpinBox(); self.sp_head.setRange(3, 40); self.sp_head.setValue(11); self.sp_head.valueChanged.connect(self.refresh_from_state)
+        self.sp_head = QSpinBox(); self.sp_head.setRange(1, 50); self.sp_head.setValue(11); self.sp_head.setToolTip("Arrowhead length in screen pixels (1–50). Larger values make arrowheads more visible."); self.sp_head.valueChanged.connect(self.refresh_from_state)
         self.sp_pad_x = QDoubleSpinBox(); self.sp_pad_x.setRange(.5, 5); self.sp_pad_x.setSingleStep(.1); self.sp_pad_x.setValue(1.0); self.sp_pad_x.valueChanged.connect(self.refresh_from_state)
         self.sp_pad_y = QDoubleSpinBox(); self.sp_pad_y.setRange(.5, 5); self.sp_pad_y.setSingleStep(.1); self.sp_pad_y.setValue(1.2); self.sp_pad_y.valueChanged.connect(self.refresh_from_state)
         self.sp_jitter = QDoubleSpinBox(); self.sp_jitter.setRange(0, .15); self.sp_jitter.setDecimals(3); self.sp_jitter.setSingleStep(.01); self.sp_jitter.setValue(0); self.sp_jitter.valueChanged.connect(self.refresh_from_state)
@@ -75,6 +75,11 @@ class VisualTab(QWidget):
         self.btn_effect_color=QPushButton("Color…");self.btn_effect_color.clicked.connect(lambda:self._choose_node_color("effect"))
         self.btn_cause_color.setStyleSheet("background:#dc4646;color:white")
         self.btn_effect_color.setStyleSheet("background:#3769be;color:white")
+        self.primary_chart_color=QColor("#3176a8");self.secondary_chart_color=QColor("#dc4646")
+        self.btn_primary_chart_color=QPushButton("Primary: #3176a8");self.btn_primary_chart_color.clicked.connect(lambda:self._choose_chart_color("primary"))
+        self.btn_secondary_chart_color=QPushButton("Secondary: #dc4646");self.btn_secondary_chart_color.clicked.connect(lambda:self._choose_chart_color("secondary"))
+        self._style_color_button(self.btn_primary_chart_color,self.primary_chart_color)
+        self._style_color_button(self.btn_secondary_chart_color,self.secondary_chart_color)
         self.chk_w_opacity = QCheckBox("W → opacity"); self.chk_w_opacity.setToolTip("Use factor weight to control node fill opacity."); self.chk_w_opacity.toggled.connect(self.refresh_from_state)
         self.chk_w_size = QCheckBox("W → size"); self.chk_w_size.setChecked(True); self.chk_w_size.setToolTip("Use factor weight to control node size."); self.chk_w_size.toggled.connect(self.refresh_from_state)
         self.chk_show_weight_labels = QCheckBox("Weight values"); self.chk_show_weight_labels.setToolTip("Show normalized weight beside each factor label."); self.chk_show_weight_labels.toggled.connect(self.refresh_from_state)
@@ -89,7 +94,7 @@ class VisualTab(QWidget):
         form.addRow("Top-K links", self.sp_topk)
         form.addRow("Top-N items", self.sp_topn)
         form.addRow("Node size", self.sp_nodes)
-        form.addRow("Arrow size", self.sp_head)
+        form.addRow("Arrow size (px, 1–50)", self.sp_head)
         form.addRow("X padding", self.sp_pad_x)
         form.addRow("Y padding", self.sp_pad_y)
         form.addRow("Jitter", self.sp_jitter)
@@ -97,6 +102,8 @@ class VisualTab(QWidget):
         effect_row=self._pair_widget(self.cb_shape_effect,self.btn_effect_color)
         form.addRow("Cause", cause_row)
         form.addRow("Effect", effect_row)
+        form.addRow("Chart color",self.btn_primary_chart_color)
+        form.addRow("Second color",self.btn_secondary_chart_color)
         form.addRow("", self.chk_arrows)
         form.addRow("", self.chk_labels)
         form.addRow("", self.chk_grid)
@@ -122,9 +129,9 @@ class VisualTab(QWidget):
         settings_page.setMinimumWidth(0); box.setMinimumWidth(0)
         self.settings_tabs.addTab(settings_scroll, "Visual options")
         bin_page = QWidget(); bin_layout = QVBoxLayout(bin_page)
-        bin_help=QLabel("Set each link interval's range, opacity, line style and color. Double-click a color cell to choose a color.");bin_help.setWordWrap(True);bin_layout.addWidget(bin_help)
+        bin_help=QLabel("Set each link interval's range and color. Opacity runs 1–50 (higher is darker); Dash runs 0–50 (0 solid, then dashed, dotted, or dash-dot). Double-click a color cell to choose it.");bin_help.setWordWrap(True);bin_layout.addWidget(bin_help)
         self.tbl_seg = QTableWidget(0, 5)
-        self.tbl_seg.setHorizontalHeaderLabels(["Low", "High", "Opacity", "Dash", "Color"])
+        self.tbl_seg.setHorizontalHeaderLabels(["Low", "High", "Opacity 1–50", "Dash 0–50", "Color"])
         self.tbl_seg.setMinimumWidth(0);self.tbl_seg.setMaximumWidth(300)
         self.tbl_seg.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tbl_seg.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -160,7 +167,7 @@ class VisualTab(QWidget):
         self.axis_tick.setToolTip("Distance between adjacent tick marks on both axes. Set Auto to let the chart choose.")
         axis_form.addRow("Tick step", self.axis_tick)
         self.apply_axis_btn = QPushButton("Apply tick spacing"); self.apply_axis_btn.clicked.connect(self._apply_axis_controls); axis_form.addRow("", self.apply_axis_btn)
-        self.btn_manage_lines = QPushButton("Add / remove reference lines…"); self.btn_manage_lines.clicked.connect(self._manage_custom_lines);axis_form.addRow("Reference lines",self.btn_manage_lines)
+        self.btn_manage_lines = QPushButton("Add / remove two-point lines…"); self.btn_manage_lines.clicked.connect(self._manage_custom_lines);axis_form.addRow("Reference lines",self.btn_manage_lines)
         self.chk_show_legend=QCheckBox("Show chart legend");self.chk_show_legend.setChecked(False);self.chk_show_legend.toggled.connect(self._on_legend_toggled);axis_form.addRow("Legend",self.chk_show_legend)
         self.btn_legend_config = QPushButton("Manage legend items…"); self.btn_legend_config.clicked.connect(self._configure_legend); axis_form.addRow("", self.btn_legend_config)
         self.lbl_axis_range = QLabel("Axis range: —"); self.lbl_axis_range.setWordWrap(True);self.lbl_axis_range.setMinimumWidth(0); axis_form.addRow("", self.lbl_axis_range)
@@ -215,7 +222,10 @@ class VisualTab(QWidget):
         for item in self.legend_extras: visible[item[0]]=item
         for ident,symbol,name,color,kind in visible.values():
             row=table.rowCount();table.insertRow(row)
-            for col,value in enumerate((ident,symbol,name,color)):table.setItem(row,col,QTableWidgetItem(str(value)))
+            table.setItem(row,0,QTableWidgetItem(str(ident)))
+            self._set_legend_combo(table,row,1,symbol,("Circle","Square","Triangle","Diamond","Pentagon","Hexagon","Star","Plus","Cross","Arrow"))
+            self._set_legend_combo(table,row,2,name,("Cause factor","Effect factor","Neutral factor","Influence interval","Reference line","Custom name…"))
+            table.setItem(row,3,QTableWidgetItem(str(color)))
         table.setToolTip("Edit names/symbols. Double-click a color cell to pick a color. Select and delete to remove an existing item.")
         table.cellDoubleClicked.connect(lambda row,col:self._choose_legend_color(table,row,col,dialog))
         layout.addWidget(QLabel("Manage the legend objects currently used by this chart; add independent explanatory items as needed."));layout.addWidget(table)
@@ -225,7 +235,9 @@ class VisualTab(QWidget):
         if dialog.exec()!=QDialog.DialogCode.Accepted:return
         defaults_by_id={item[0]:item for item in defaults};new_overrides={};new_extras={};kept=set()
         for row in range(table.rowCount()):
-            vals=[table.item(row,col).text().strip() if table.item(row,col) else "" for col in range(4)]
+            vals=[table.item(row,0).text().strip() if table.item(row,0) else "",
+                  self._legend_combo_text(table,row,1),self._legend_combo_text(table,row,2),
+                  table.item(row,3).text().strip() if table.item(row,3) else ""]
             ident,symbol,name,color=vals
             if not name:continue
             if ident in defaults_by_id:
@@ -237,7 +249,7 @@ class VisualTab(QWidget):
         self.refresh_from_state()
 
     def _choose_legend_color(self,table,row,col,dialog):
-        if col!=3:return
+        if col not in (3,4):return
         cell=table.item(row,col)
         color=QColorDialog.getColor(QColor(cell.text() if cell else "#334155"),dialog,"Legend item color")
         if color.isValid():
@@ -245,10 +257,20 @@ class VisualTab(QWidget):
             cell.setText(color.name())
 
     @staticmethod
-    def _add_legend_row(table):
+    def _legend_combo_text(table,row,col):
+        widget=table.cellWidget(row,col)
+        return widget.currentText().strip() if isinstance(widget,QComboBox) else (table.item(row,col).text().strip() if table.item(row,col) else "")
+
+    @staticmethod
+    def _set_legend_combo(table,row,col,value,options):
+        combo=QComboBox();combo.setEditable(True);combo.addItems(options);combo.setCurrentText(value);table.setCellWidget(row,col,combo)
+
+    def _add_legend_row(self,table):
         row=table.rowCount();table.insertRow(row)
-        for col,value in enumerate(("","Circle","New legend item","#334155")):
-            table.setItem(row,col,QTableWidgetItem(value))
+        table.setItem(row,0,QTableWidgetItem(""))
+        self._set_legend_combo(table,row,1,"Circle",("Circle","Square","Triangle","Diamond","Pentagon","Hexagon","Star","Plus","Cross","Arrow"))
+        self._set_legend_combo(table,row,2,"Custom name…",("Cause factor","Effect factor","Neutral factor","Influence interval","Reference line","Custom name…"))
+        table.setItem(row,3,QTableWidgetItem("#334155"))
 
     def _default_legend_items(self):
         if self.state.data.method!="DEMATEL" or self.cb_chart.currentText()!="INRM influence network":return []
@@ -258,7 +280,7 @@ class VisualTab(QWidget):
         if self._bin_intervals:
             for idx in sorted(set((0,len(self._bin_intervals)//2,len(self._bin_intervals)-1))):
                 low,high=self._bin_intervals[idx];style=self._bin_styles[idx]
-                items.append((f"base:interval:{idx}","Arrow",f"T={low:.3g}–{high:.3g} · Op {style['opacity']}/20",style.get("color","#64748b"),"arrow"))
+                items.append((f"base:interval:{idx}","Arrow",f"T={low:.3g}–{high:.3g} · Op {style['opacity']}/50",style.get("color","#64748b"),"arrow"))
         return items
 
     def _on_legend_toggled(self,enabled):
@@ -273,15 +295,37 @@ class VisualTab(QWidget):
         button.setStyleSheet(f"background:{color.name()};color:{'#fff' if color.lightness()<130 else '#172033'}")
         self.refresh_from_state()
 
+    @staticmethod
+    def _style_color_button(button,color):
+        color=QColor(color);button.setStyleSheet(f"background:{color.name()};color:{'#fff' if color.lightness()<130 else '#172033'}")
+
+    def _choose_chart_color(self,which):
+        attr="primary_chart_color" if which=="primary" else "secondary_chart_color"
+        color=QColorDialog.getColor(getattr(self,attr),self,f"Choose {which} chart color")
+        if not color.isValid():return
+        setattr(self,attr,color)
+        button=self.btn_primary_chart_color if which=="primary" else self.btn_secondary_chart_color
+        button.setText(f"{'Primary' if which=='primary' else 'Secondary'}: {color.name()}")
+        self._style_color_button(button,color);self.refresh_from_state()
+
     def _manage_custom_lines(self):
-        dialog=QDialog(self);dialog.setWindowTitle("Manage reference lines");layout=QVBoxLayout(dialog)
-        table=QTableWidget(len(self.custom_lines),4);table.setHorizontalHeaderLabels(["Axis","Value k","Label","Color"])
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        dialog=QDialog(self);dialog.setWindowTitle("Manage two-point reference lines");dialog.resize(1050,460);layout=QVBoxLayout(dialog)
+        table=QTableWidget(len(self.custom_lines),8);table.setHorizontalHeaderLabels(["X₁","Y₁","X₂","Y₂","Label","Color","Opacity 1–50","Dash 0–50"])
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for col,width in enumerate((74,74,74,74,170,105,105,90)):table.setColumnWidth(col,width)
         for row,line in enumerate(self.custom_lines):
-            axis,value,label,*color=line;color=color[0] if color else "#7c3aed"
-            for col,text in enumerate(("Horizontal y = k" if axis=="h" else "Vertical x = k",f"{value:g}",label,color)):table.setItem(row,col,QTableWidgetItem(text))
-        table.cellDoubleClicked.connect(lambda row,col:self._choose_legend_color(table,row,col,dialog) if col==3 else None)
-        layout.addWidget(QLabel("Add and edit horizontal or vertical reference lines. Select a row and remove it when no longer needed."));layout.addWidget(table)
+            if len(line)>=7:
+                x1,y1,x2,y2,label,color,opacity,dash=line
+            else:
+                axis,value,label,*extra=line;color=extra[0] if extra else "#7c3aed"
+                x1,y1,x2,y2=(value,0,value,1) if axis=="v" else (0,value,1,value)
+                opacity,dash=(40,0)
+            values=(x1,y1,x2,y2,label,color,opacity,dash)
+            for col,value in enumerate(values):
+                item=QTableWidgetItem(str(value));table.setItem(row,col,item)
+                if col==5:item.setBackground(QColor(str(value)))
+        table.cellDoubleClicked.connect(lambda row,col:self._choose_line_color(table,row,col,dialog) if col==5 else None)
+        layout.addWidget(QLabel("Enter two points (x₁,y₁) and (x₂,y₂). The app draws the straight function through them; equal X values create a vertical line. Opacity: 1–50. Dash: 0 solid, then dashed/dotted/dash-dot up to 50."));layout.addWidget(table)
         buttons=QHBoxLayout();add=QPushButton("Add line");remove=QPushButton("Delete selected line");buttons.addWidget(add);buttons.addWidget(remove);layout.addLayout(buttons)
         add.clicked.connect(lambda:self._add_reference_line_row(table))
         remove.clicked.connect(lambda:table.removeRow(table.currentRow()) if table.currentRow()>=0 else None)
@@ -289,31 +333,59 @@ class VisualTab(QWidget):
         if dialog.exec()==QDialog.DialogCode.Accepted:
             lines=[]
             for row in range(table.rowCount()):
-                axis=table.item(row,0).text() if table.item(row,0) else "Horizontal y = k"
-                try:value=float(table.item(row,1).text())
+                try:points=[float(table.item(row,col).text()) for col in range(4)]
                 except (ValueError,AttributeError):continue
-                label=table.item(row,2).text().strip() if table.item(row,2) else ""
-                color=table.item(row,3).text().strip() if table.item(row,3) else "#7c3aed"
-                lines.append(("h" if axis.startswith("Horizontal") else "v",value,label,color if QColor(color).isValid() else "#7c3aed"))
+                if np.hypot(points[2]-points[0],points[3]-points[1])<1e-12:continue
+                label=table.item(row,4).text().strip() if table.item(row,4) else ""
+                color=table.item(row,5).text().strip() if table.item(row,5) else "#7c3aed"
+                try:opacity=max(1,min(50,int(float(table.item(row,6).text()))))
+                except (ValueError,AttributeError):opacity=40
+                try:dash=max(0,min(50,int(float(table.item(row,7).text()))))
+                except (ValueError,AttributeError):dash=0
+                lines.append((*points,label,color if QColor(color).isValid() else "#7c3aed",opacity,dash))
             self.custom_lines=lines;self.refresh_from_state()
 
     @staticmethod
     def _add_reference_line_row(table):
         row=table.rowCount();table.insertRow(row)
-        for col,value in enumerate(("Horizontal y = k","0","","#7c3aed")):table.setItem(row,col,QTableWidgetItem(value))
+        for col,value in enumerate(("0","0","1","1","","#7c3aed","40","0")):
+            item=QTableWidgetItem(value);table.setItem(row,col,item)
+            if col==5:item.setBackground(QColor(value))
+
+    def _choose_line_color(self,table,row,column,dialog):
+        item=table.item(row,column);initial=QColor(item.text()) if item and QColor(item.text()).isValid() else QColor("#7c3aed")
+        color=QColorDialog.getColor(initial,dialog,"Reference line color")
+        if color.isValid():
+            if item is None:item=QTableWidgetItem();table.setItem(row,column,item)
+            item.setText(color.name());item.setBackground(color)
 
     def _draw_custom_lines(self):
         for line in self.custom_lines:
-            axis,value,label,*extra=line;color=extra[0] if extra else "#7c3aed"
+            if len(line)<7:continue
+            x1,y1,x2,y2,label,color,opacity,*dash=line;dash=dash[0] if dash else 0
             if not QColor(color).isValid():color="#7c3aed"
-            angle = 0 if axis == "h" else 90
-            item = pg.InfiniteLine(pos=value, angle=angle, movable=True,
-                                   pen=pg.mkPen(color, width=1.5, style=Qt.PenStyle.DashLine))
-            self.plot.addItem(item)
-            if label:
-                text = pg.TextItem(label, color=color, anchor=(0, .5))
-                text.setPos(0, value) if axis == "h" else text.setPos(value, 0)
-                self.plot.addItem(text)
+            x_range,y_range=self.plot.getViewBox().viewRange()
+            if abs(x2-x1)<1e-12:
+                draw_x=[float(x1),float(x1)];draw_y=[float(y_range[0]),float(y_range[1])]
+                equation=f"x = {x1:.5g}"
+            else:
+                slope=(y2-y1)/(x2-x1);intercept=y1-slope*x1
+                draw_x=[float(x_range[0]),float(x_range[1])];draw_y=[slope*draw_x[0]+intercept,slope*draw_x[1]+intercept]
+                equation=f"y = {slope:.5g}x {intercept:+.5g}"
+            qcolor=QColor(color);qcolor.setAlphaF(max(1,min(50,int(opacity)))/50)
+            pen=pg.mkPen(color=qcolor,width=1.5,style=self._dash_style(dash))
+            item=pg.PlotDataItem(draw_x,draw_y,pen=pen);self.plot.addItem(item)
+            line_label=label or equation
+            text=pg.TextItem(line_label,color=color,anchor=(0,.5));text.setPos((draw_x[0]+draw_x[1])/2,(draw_y[0]+draw_y[1])/2);self.plot.addItem(text)
+            self._hover_edges.append({"view_points":[pg.Point(draw_x[0],draw_y[0]),pg.Point(draw_x[1],draw_y[1])],"tip":f"<b>{line_label}</b><br>{equation}<br>Through ({x1:g}, {y1:g}) and ({x2:g}, {y2:g})"})
+
+    @staticmethod
+    def _dash_style(value):
+        value=max(0,min(50,int(value)))
+        if value==0:return Qt.PenStyle.SolidLine
+        if value<=12:return Qt.PenStyle.DashLine
+        if value<=25:return Qt.PenStyle.DotLine
+        return Qt.PenStyle.DashDotLine
 
     def _sync_options(self):
         d = self.state.data
@@ -415,13 +487,13 @@ class VisualTab(QWidget):
             elif chart == "Spearman rank correlation": self._draw_rank_correlation("spearman")
             elif chart == "Kendall rank correlation": self._draw_rank_correlation("kendall")
             else: self._draw_ranking(chart)
-        self._draw_custom_lines()
-        self._draw_legend()
         if saved_view is not None:
             self.plot.setXRange(*saved_view[0], padding=0)
             self.plot.setYRange(*saved_view[1], padding=0)
         elif not (d.method == "DEMATEL" and self.cb_chart.currentText() in ("INRM influence network", "Prominence–relation quadrants")):
             self.plot.autoRange(padding=.08)
+        self._draw_custom_lines()
+        self._draw_legend()
         title = self.ed_title.currentText().strip()
         self.plot.setTitle(title, color="#172033", size="12pt")
         self._apply_axis_controls()
@@ -467,6 +539,8 @@ class VisualTab(QWidget):
             if distance < best_distance:
                 best_node, best_distance = row, distance
         if best_node is not None and best_distance <= best_node["radius"] + 7:
+            if "tip" in best_node:
+                QToolTip.showText(QCursor.pos(),best_node["tip"],self.plot);return
             i = best_node["index"]
             r = d.dematel_table[i]
             tip = (f"<b>{d.labels[i]}</b><br>R: {r['R']:.6g}<br>C: {r['C']:.6g}"
@@ -483,8 +557,9 @@ class VisualTab(QWidget):
                 if dist < edge_distance:
                     closest, edge_distance = edge, dist
         if closest is not None and edge_distance <= 7:
-            tip = (f"<b>{d.labels[closest['i']]} → {d.labels[closest['j']]}</b>"
-                   f"<br>Tᵢⱼ: {closest['value']:.7g}")
+            if "tip" in closest:tip=closest["tip"]
+            else:tip = (f"<b>{d.labels[closest['i']]} → {d.labels[closest['j']]}</b>"
+                        f"<br>Tᵢⱼ: {closest['value']:.7g}")
             QToolTip.showText(QCursor.pos(), tip, self.plot)
         else:
             QToolTip.hideText()
@@ -633,7 +708,7 @@ class VisualTab(QWidget):
             for row in range(count):
                 mix=row/max(1,count-1)
                 color=QColor(int(175-120*mix),int(190-120*mix),int(205-105*mix)).name()
-                self._bin_styles.append({"opacity":2 if row<count-1 else 6,"dash":0,"color":color})
+                self._bin_styles.append({"opacity":35,"dash":0,"color":color})
             self.tbl_seg.blockSignals(True); self.tbl_seg.setRowCount(count)
             for row in range(count):
                 for col, value in enumerate((edges[row], edges[row+1], self._bin_styles[row]["opacity"], 0,self._bin_styles[row]["color"])):
@@ -669,12 +744,12 @@ class VisualTab(QWidget):
         styles=[]
         for row in range(self.tbl_seg.rowCount()):
             try: op=int(float(self.tbl_seg.item(row,2).text()))
-            except (AttributeError,ValueError): op=14
+            except (AttributeError,ValueError): op=40
             try: dash=int(float(self.tbl_seg.item(row,3).text()))
             except (AttributeError,ValueError): dash=0
             color_item=self.tbl_seg.item(row,4);color=color_item.text().strip() if color_item else "#64748b"
             if not QColor(color).isValid():color="#64748b"
-            styles.append({"opacity": max(0,min(20,op)), "dash": max(0,min(20,dash)),"color":QColor(color).name()})
+            styles.append({"opacity": max(1,min(50,op)), "dash": max(0,min(50,dash)),"color":QColor(color).name()})
         return styles
 
     def _choose_bin_color(self,row,column):
@@ -691,8 +766,8 @@ class VisualTab(QWidget):
 
     def _on_bin_table_changed(self, item):
         if item.column() in (2,3):
-            try: value=max(0,min(20,int(float(item.text()))))
-            except ValueError: value=14 if item.column()==2 else 0
+            try: value=max(1,min(50,int(float(item.text())))) if item.column()==2 else max(0,min(50,int(float(item.text()))))
+            except ValueError: value=40 if item.column()==2 else 0
             self.tbl_seg.blockSignals(True); item.setText(str(value)); self.tbl_seg.blockSignals(False)
         elif item.column()==4:
             color=QColor(item.text())
@@ -727,15 +802,15 @@ class VisualTab(QWidget):
                                          omt*omt*start.y()+2*omt*t*control.y()+t*t*tip.y()))
         view_points=[vb.mapSceneToView(point) for point in scene_points]
         strength = min(1.0, max(0.0, value / max(edge_max, 1e-12)))
-        alpha=int(round(12 + (style["opacity"] / 20.0) * 228))
-        width=1.0 + (style["opacity"] / 20.0) * 1.4
+        alpha=int(round(10 + (style["opacity"] / 50.0) * 245))
+        width=1.0 + (style["opacity"] / 50.0) * 1.4
         rgb = QColor(style.get("color",pg.mkColor(self._edge_rgb(value)).name())).getRgb()[:3]
         if self._selected_idx is not None:
             if i == self._selected_idx: rgb=(225,92,40)
             elif j == self._selected_idx: rgb=(20,125,190)
             else: alpha=max(14,alpha//4); width=max(.55,width*.7)
         dash_value=style["dash"]
-        dash_style = Qt.PenStyle.SolidLine if dash_value <= 0 else Qt.PenStyle.DashLine if dash_value <= 7 else Qt.PenStyle.DotLine if dash_value <= 14 else Qt.PenStyle.DashDotLine
+        dash_style = self._dash_style(dash_value)
         pen=pg.mkPen(color=(*rgb, alpha),width=width,style=dash_style)
         self.plot.plot([point.x() for point in view_points],[point.y() for point in view_points],pen=pen)
         self._hover_edges.append({"i":i,"j":j,"value":value,"view_points":view_points})
@@ -761,6 +836,7 @@ class VisualTab(QWidget):
         colors=[(*cause_rgb,230) if rel[i]>1e-12 else (*effect_rgb,230) if rel[i]<-1e-12 else (120,120,120,230) for i in keep]
         sizes=9+np.divide(weights[keep]-weights[keep].min(),max(float(np.ptp(weights[keep])),1e-12))*10
         self.plot.addItem(pg.ScatterPlotItem(x=p[keep],y=rel[keep],size=sizes,brush=colors,pen=pg.mkPen("#263445",width=.7)))
+        self._hover_nodes=[{"x":float(p[i]),"y":float(rel[i]),"radius":float(sizes[row]/2),"tip":f"<b>{d.labels[i]}</b><br>R+C: {p[i]:.6g}<br>R−C: {rel[i]:.6g}<br>Weight: {weights[i]:.6g}<br>Group: {d.dematel_table[i]['Group']}"} for row,i in enumerate(keep)]
         self.plot.addItem(pg.InfiniteLine(pos=0,angle=0,pen=pg.mkPen("#4b5563",width=1)))
         if self.chk_line_prom_mid.isChecked():
             mid=float((np.min(p[keep])+np.max(p[keep]))/2); self.plot.addItem(pg.InfiniteLine(pos=mid,angle=90,pen=pg.mkPen("#0f766e",width=1.5,style=Qt.PenStyle.DashLine)))
@@ -838,11 +914,13 @@ class VisualTab(QWidget):
     def _draw_heatmap(self):
         d=self.state.data; a=np.asarray(d.matrix,float)
         image=pg.ImageItem(a); self.plot.addItem(image)
-        lut=pg.colormap.get("viridis").getLookupTable(0.0,1.0,256); image.setLookupTable(lut)
+        cmap=pg.ColorMap([0,1],[(248,250,252),self.primary_chart_color.getRgb()[:3]])
+        image.setLookupTable(cmap.getLookupTable(0.0,1.0,256))
         lo,hi=float(a.min()),float(a.max()); image.setLevels([lo,hi if hi>lo else lo+1])
         image.setRect(QRectF(0,0,a.shape[0],a.shape[1]))
         ticks=[[(i+.5,str(d.labels[i])) for i in range(len(d.labels))]]
         self.plot.getAxis("bottom").setTicks(ticks); self.plot.getAxis("left").setTicks(ticks)
+        self._hover_nodes=[{"x":i+.5,"y":j+.5,"radius":12,"tip":f"<b>{d.labels[i]} → {d.labels[j]}</b><br>Total influence: {a[i,j]:.7g}"} for i in range(a.shape[0]) for j in range(a.shape[1])]
         self.plot.setLabel("bottom","Source factor"); self.plot.setLabel("left","Target factor")
         self.lbl_note.setText("Cell (i, j) is total influence from factor i to factor j.")
 
@@ -850,8 +928,9 @@ class VisualTab(QWidget):
         p, rel, weights=self._dematel_arrays(); d=self.state.data
         order=np.argsort(p); topn=self.sp_topn.value()
         if topn>0: order=order[-topn:]
-        y=np.arange(len(order)); bars=pg.BarGraphItem(x0=np.zeros(len(order)),x1=p[order],y=y,height=.7,brush=(57,111,169,220),pen=pg.mkPen(None))
+        y=np.arange(len(order)); bars=pg.BarGraphItem(x0=np.zeros(len(order)),x1=p[order],y=y,height=.7,brush=(*self.primary_chart_color.getRgb()[:3],220),pen=pg.mkPen(None))
         self.plot.addItem(bars); self.plot.getAxis("left").setTicks([[(int(i),d.labels[idx]) for i,idx in enumerate(order)]])
+        self._hover_nodes=[{"x":float(p[idx]),"y":float(i),"radius":10,"tip":f"<b>{d.labels[idx]}</b><br>R+C: {p[idx]:.6g}<br>R−C: {rel[idx]:.6g}<br>Weight: {weights[idx]:.6g}"} for i,idx in enumerate(order)]
         self.plot.setLabel("bottom","Prominence R+C"); self.plot.setLabel("left","Factor")
         self.lbl_note.setText("Factors are ordered by prominence; horizontal bar length equals R+C.")
 
@@ -870,23 +949,31 @@ class VisualTab(QWidget):
         d=self.state.data; values,order=self._ranking_data()
         if values is None:return
         names=np.array(d.ranking_labels,dtype=object); selected=values[order]; labels=names[order]
+        primary=(*self.primary_chart_color.getRgb()[:3],230)
+        secondary=(*self.secondary_chart_color.getRgb()[:3],210)
+        self._hover_nodes=[]
+        rank_values=np.empty(len(values),int)
+        rank_values[np.argsort(-values if self.cb_direction.currentIndex()==0 else values,kind="stable")]=np.arange(1,len(values)+1)
         if chart == "Score bar chart":
-            y=np.arange(len(order)); self.plot.addItem(pg.BarGraphItem(x0=np.zeros(len(order)),x1=selected,y=y,height=.66,brush=(49,118,168,220),pen=pg.mkPen(None)))
+            y=np.arange(len(order))
+            self.plot.addItem(pg.BarGraphItem(x0=np.zeros(len(order)),x1=selected,y=y,height=.66,brush=(*primary[:3],220),pen=pg.mkPen(None)))
             self.plot.getAxis("left").setTicks([[(int(i),str(v)) for i,v in enumerate(labels)]])
             self.plot.setLabel("bottom",self.cb_metric.currentText()); self.plot.setLabel("left","Alternative")
+            for row,index in enumerate(order):px,py=float(selected[row]),float(row);self._hover_nodes.append({"x":px,"y":py,"radius":11,"tip":f"<b>{names[index]}</b><br>{self.cb_metric.currentText()}: {values[index]:.6g}<br>Rank: {rank_values[index]}"})
         elif chart == "Score lollipop":
-            y=np.arange(len(order));
-            for yi,val in zip(y,selected): self.plot.plot([0,val],[yi,yi],pen=pg.mkPen("#9aa8b5",width=1.5))
-            self.plot.addItem(pg.ScatterPlotItem(x=selected,y=y,size=10,brush=(37,115,164,230),pen=pg.mkPen("w",width=1)))
+            y=np.arange(len(order))
+            for yi,val in zip(y,selected): self.plot.plot([0,val],[yi,yi],pen=pg.mkPen(secondary,width=1.5))
+            self.plot.addItem(pg.ScatterPlotItem(x=selected,y=y,size=10,brush=primary,pen=pg.mkPen("w",width=1)))
             self.plot.getAxis("left").setTicks([[(int(i),str(v)) for i,v in enumerate(labels)]])
             self.plot.setLabel("bottom",self.cb_metric.currentText()); self.plot.setLabel("left","Alternative")
+            for row,index in enumerate(order):self._hover_nodes.append({"x":float(selected[row]),"y":float(row),"radius":10,"tip":f"<b>{names[index]}</b><br>{self.cb_metric.currentText()}: {values[index]:.6g}<br>Rank: {rank_values[index]}"})
         else:
-            ranks=np.empty(len(values),int); ranks[np.argsort(-values if self.cb_direction.currentIndex()==0 else values,kind="stable")]=np.arange(1,len(values)+1)
-            self.plot.addItem(pg.ScatterPlotItem(x=ranks[order],y=selected,size=10,brush=(37,115,164,230),pen=pg.mkPen("w",width=1)))
+            self.plot.addItem(pg.ScatterPlotItem(x=rank_values[order],y=selected,size=10,brush=primary,pen=pg.mkPen("w",width=1)))
             if self.chk_labels.isChecked():
                 for i in order:
-                    t=pg.TextItem(str(names[i]),color="#172033",anchor=(.5,1.2));t.setPos(float(ranks[i]),float(values[i]));self.plot.addItem(t)
+                    t=pg.TextItem(str(names[i]),color="#172033",anchor=(.5,1.2));t.setPos(float(rank_values[i]),float(values[i]));self.plot.addItem(t)
             self.plot.setLabel("bottom","Rank (1 = best)");self.plot.setLabel("left",self.cb_metric.currentText())
+            for index in order:self._hover_nodes.append({"x":float(rank_values[index]),"y":float(values[index]),"radius":10,"tip":f"<b>{names[index]}</b><br>{self.cb_metric.currentText()}: {values[index]:.6g}<br>Rank: {rank_values[index]}"})
         self.lbl_note.setText(f"{len(order)} alternatives shown · rank direction: {'higher' if self.cb_direction.currentIndex()==0 else 'lower'} values are better.")
 
     def _draw_profile(self):
@@ -894,12 +981,15 @@ class VisualTab(QWidget):
         if values.shape[1]<2: self.lbl_note.setText("Import at least two result columns for a profile chart."); return
         inds=np.arange(values.shape[1])
         directions=directions_from_names(d.ranking_columns)
+        self._hover_nodes=[]
         for i,name in enumerate(d.ranking_labels):
             vals=values[i].astype(float); span=np.ptp(values,axis=0); low=np.min(values,axis=0)
             norm=np.divide(vals-low,span,out=np.full_like(vals,.5),where=span>1e-12)
             norm=np.where(directions, norm, 1-norm)
             if len(d.ranking_labels)>12 and i>=12:break
-            self.plot.plot(inds,norm,pen=pg.mkPen(pg.intColor(i,hues=max(12,min(24,len(d.ranking_labels)))),width=1.4),symbol="o",symbolSize=5,name=name)
+            color=pg.ColorMap([0,1],[self.primary_chart_color,self.secondary_chart_color]).map(i/max(1,min(len(d.ranking_labels),12)-1),mode="qcolor")
+            self.plot.plot(inds,norm,pen=pg.mkPen(color,width=1.4),symbol="o",symbolSize=5,name=name)
+            for col,value in enumerate(norm):self._hover_nodes.append({"x":float(col),"y":float(value),"radius":8,"tip":f"<b>{name}</b><br>{d.ranking_columns[col]}: {values[i,col]:.6g}<br>Normalized: {value:.4f}"})
         self.plot.getAxis("bottom").setTicks([[(int(i),c) for i,c in enumerate(d.ranking_columns)]])
         self.plot.setLabel("left","Within-metric normalized value");self.plot.setLabel("bottom","Final result metric")
         self.lbl_note.setText("Each metric is scaled to 0–1 for visual comparison only; this does not alter imported values.")
@@ -910,9 +1000,12 @@ class VisualTab(QWidget):
         result=pairwise_rank_correlations(vals,d.ranking_columns)
         ranks=result["ranks"]
         m=min(vals.shape[1],8)
+        self._hover_nodes=[]
         for i,name in enumerate(d.ranking_labels):
             if len(d.ranking_labels)>30 and i>=30: break
-            self.plot.plot(np.arange(m),ranks[i,:m],pen=pg.mkPen(pg.intColor(i,hues=max(12,min(30,len(d.ranking_labels)))),width=1.4),symbol="o",symbolSize=5,name=name)
+            color=pg.ColorMap([0,1],[self.primary_chart_color,self.secondary_chart_color]).map(i/max(1,min(len(d.ranking_labels),30)-1),mode="qcolor")
+            self.plot.plot(np.arange(m),ranks[i,:m],pen=pg.mkPen(color,width=1.4),symbol="o",symbolSize=5,name=name)
+            for col,rank in enumerate(ranks[i,:m]):self._hover_nodes.append({"x":float(col),"y":float(rank),"radius":8,"tip":f"<b>{name}</b><br>{d.ranking_columns[col]} rank: {rank:.4g}"})
         self.plot.getAxis("bottom").setTicks([[(int(i),d.ranking_columns[i]) for i in range(m)]])
         self.plot.invertY(True); self.plot.setLabel("left","Rank (1 = best)");self.plot.setLabel("bottom","Method / result column")
         self.lbl_note.setText("Each line is an alternative; ranks use average positions for ties. Direction defaults are inferred from column names and can be adjusted in the score chart.")
@@ -926,8 +1019,10 @@ class VisualTab(QWidget):
         names=[name if len(name)<=14 else name[:12]+"…" for name in d.ranking_columns]
         n=len(names)
         image=pg.ImageItem(matrix.T)
-        image.setLookupTable(pg.colormap.get("viridis").getLookupTable(0.0,1.0,256))
+        color_map=pg.ColorMap([0,.5,1],[self.primary_chart_color,QColor("#ffffff"),self.secondary_chart_color])
+        image.setLookupTable(color_map.getLookupTable(0.0,1.0,256))
         image.setLevels([-1,1]); image.setRect(QRectF(0,0,n,n)); self.plot.addItem(image)
+        self._hover_nodes=[]
         ticks=[[(i+.5,name) for i,name in enumerate(names)]]
         self.plot.getAxis("bottom").setTicks(ticks); self.plot.getAxis("left").setTicks(ticks)
         for row in range(n):
@@ -936,6 +1031,7 @@ class VisualTab(QWidget):
                 label="NA" if not np.isfinite(value) else f"{value:.2f}"
                 item=pg.TextItem(label,color="white" if np.isfinite(value) and abs(value)>.48 else "#172033",anchor=(.5,.5))
                 item.setPos(col+.5,row+.5); self.plot.addItem(item)
+                self._hover_nodes.append({"x":col+.5,"y":row+.5,"radius":12,"tip":f"<b>{d.ranking_columns[row]} × {d.ranking_columns[col]}</b><br>{label}"})
         self.plot.setLabel("bottom","Ranking method / result column")
         self.plot.setLabel("left","Ranking method / result column")
         label="Spearman ρ" if method=="spearman" else "Kendall τ-b"

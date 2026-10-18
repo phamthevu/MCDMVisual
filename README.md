@@ -1,13 +1,12 @@
 # MCDMVisualStudio
 
-Desktop app for visualizing final DEMATEL and MCDM ranking results, drawing freeform XY figures, and inspecting imported regression / SEM outputs.
+Desktop app for visualizing final DEMATEL and MCDM ranking results and inspecting imported regression / SEM outputs.
 
 ## App tabs
 
 - **Data:** select the input type, import one workbook/CSV, choose an Excel worksheet when needed, and preview the imported values.
-- **Visual:** DEMATEL influence network, prominence–relation quadrants, influence heatmap, prominence ranking, and final ranking charts. Keep zoom while changing chart settings or chart type; use `+` / `−` and set tick spacing while the data determines the visible range. Manage colored `x=k` / `y=k` reference lines in one dialog. For DEMATEL networks, choose Cause and Effect marker shapes and colors. The chart legend is hidden by default; enable it, then manage or remove existing items and add your own descriptions. The **Arrows** panel sets each influence interval's opacity, line style, and color.
-- **XY Drawing:** separate blank XY canvas with a PowerPoint-style toolbar. Drag on the canvas to size rectangles, ellipses, triangles, and arrows; click to place a default-size shape. Type a label and click **Add text**, then drag the label to reposition it. Configure text background, border, and colors; double-click an object's name to rename it, or select it and press **Delete**. Use **Lock view**, `+`, and `−` to control the canvas.
-- **Quantitative Charts:** uses the data imported from **Data**; there is no second import button. Select Regression, CB-SEM, or PLS-SEM in Data, import the matching worksheet, and the corresponding analysis tab unlocks. Regression provides observed-vs-fitted, residuals-vs-fitted, and coefficient charts. CB-SEM and PLS-SEM provide path diagrams, coefficient charts, and imported metric charts.
+- **Visual:** DEMATEL influence network, prominence–relation quadrants, influence heatmap, prominence ranking, and final ranking charts. Hover over points, cells, and links to see the underlying values. Keep zoom while changing chart settings or chart type; use `+` / `−` and set tick spacing while the data determines the visible range. Add reference functions by entering two points `(x₁,y₁)` and `(x₂,y₂)`; the app extends the line through the current chart view and labels its equation. Configure line color, opacity (1–50), and dash pattern (0–50). Choose primary and secondary colors for the other chart types; DEMATEL Cause and Effect markers have separate shape and color controls. The chart legend is hidden by default; enable it, then manage existing items or add your own using editable symbol and standard-name dropdowns. The **Arrows** panel configures influence interval color, opacity (1–50), dash pattern (0–50), and arrowhead size (1–50 px).
+- **Quantitative Charts:** uses the data imported from **Data**; there is no second import button. Select Regression, CB-SEM, or PLS-SEM in Data, import the matching worksheet, and the corresponding analysis tab unlocks. Regression provides observed-vs-fitted, residuals-vs-fitted, and coefficient charts. CB-SEM and PLS-SEM provide path diagrams with directional arrowheads, coefficient charts, and imported metric charts. Hover over observations, estimates, paths, and constructs for details; choose primary and secondary colors for the charts.
 
 The quantitative charts visualize imported outputs. Regression's OLS line is calculated for visual diagnostics. CB-SEM and PLS-SEM models and measurement validity indices are not estimated by this application.
 
@@ -51,7 +50,7 @@ Run `build_windows.bat`. It creates `.build-venv`, installs dependencies and PyI
 
 ## Test
 
-The UI tests include drag-to-draw shapes and arrows, arrowhead geometry and color, text positioning and styling, object renaming/deletion, PNG/SVG rendering, legend/reference management, Cause/Effect marker settings, import-mode gating, axis panel sizing, and zoom retention while switching charts:
+The UI tests include removal of the XY Drawing tab, SEM arrowheads and hover data, configurable chart colors, two-point reference functions, arrow opacity/dash/size ranges, legend dropdowns, Cause/Effect marker settings, import-mode gating, axis panel sizing, and zoom retention while switching charts:
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v
