@@ -17,6 +17,10 @@ class AppData:
     ranking_labels: list[str] = field(default_factory=list)
     ranking_columns: list[str] = field(default_factory=list)
     ranking_values: np.ndarray | None = None
+    cooccurrence_frame: object | None = None
+    cooccurrence_labels: list[str] = field(default_factory=list)
+    cooccurrence_matrix: np.ndarray | None = None
+    cooccurrence_excerpt_count: int = 0
     dematel_table: list[dict] = field(default_factory=list)
     label_positions: dict[str, tuple[float, float]] = field(default_factory=dict)
     vis: VisualParams = field(default_factory=VisualParams)

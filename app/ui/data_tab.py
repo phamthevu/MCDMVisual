@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from app.core.io_excel import load_total_influence_matrix, load_ranking_results
 from app.core.dematel import compute_dematel_from_total
 from app.core.visual_scale import min_mid_max, compute_edges
+from app.core.cooccurrence import compute_code_cooccurrence
 
 
 class DataTab(QWidget):
@@ -20,7 +21,8 @@ class DataTab(QWidget):
         bar.addWidget(QLabel("Analysis"))
         self.cb_mode = QComboBox()
         self.cb_mode.addItems(["DEMATEL INRM (total influence T)", "Ranking results (TOPSIS / other methods)",
-                               "Regression results", "CB-SEM results", "PLS-SEM results"])
+                               "Regression results", "CB-SEM results", "PLS-SEM results",
+                               "Code co-occurrence (excerpt coding)"])
         self.cb_mode.currentIndexChanged.connect(self.on_mode_changed)
         bar.addWidget(self.cb_mode)
         self.btn_load = QPushButton("Import Excel / CSV")
@@ -69,16 +71,17 @@ class DataTab(QWidget):
         self._busy = False
 
     def on_mode_changed(self, index):
-        self.state.data.method = ["DEMATEL", "Ranking", "Regression", "CB-SEM", "PLS-SEM"][index]
+        self.state.data.method = ["DEMATEL", "Ranking", "Regression", "CB-SEM", "PLS-SEM", "Co-occurrence"][index]
         is_dematel = index == 0
         prompts = ["DEMATEL input: final total influence matrix T (numeric values).",
                    "Ranking input: alternative in column 1; one or more final numeric result columns after it.",
                    "Regression: import a sheet with observed X/Y columns; predicted/residual columns are optional.",
                    "CB-SEM: import path estimates; use Source, Target, Estimate columns. Fit indices may be in the same sheet.",
-                   "PLS-SEM: import path estimates; use Source, Target, Estimate columns. Loadings/validity metrics can be in the sheet."]
+                   "PLS-SEM: import path estimates; use Source, Target, Estimate columns. Loadings/validity metrics can be in the sheet.",
+                   "Co-occurrence: import Excerpt ID plus 0/1 code columns, or a long Excerpt ID / Code assignment list."]
         self.lbl_input.setText(prompts[index])
         self.scale_box.setEnabled(is_dematel)
-        if index < 2:
+        if self.state.data.method not in ("Regression", "CB-SEM", "PLS-SEM"):
             self.state.data.quant_type = ""
         self._render_input()
         self._recompute()
@@ -107,6 +110,14 @@ class DataTab(QWidget):
                 self.state.data.ranking_labels = names
                 self.state.data.ranking_columns = columns
                 self.state.data.ranking_values = values
+            elif self.state.data.method == "Co-occurrence":
+                frame=(pd.read_csv(path) if path.lower().endswith(".csv") else
+                       pd.read_excel(path,sheet_name=sheet))
+                labels,matrix,excerpt_count=compute_code_cooccurrence(frame)
+                self.state.data.cooccurrence_frame=frame
+                self.state.data.cooccurrence_labels=labels
+                self.state.data.cooccurrence_matrix=matrix
+                self.state.data.cooccurrence_excerpt_count=excerpt_count
             else:
                 if path.lower().endswith(".csv"):
                     self.state.data.quant_frame=pd.read_csv(path)
@@ -142,6 +153,16 @@ class DataTab(QWidget):
                 for c in range(a.shape[1]):
                     item = QTableWidgetItem(f"{a[r,c]:.7g}"); item.setTextAlignment(Qt.AlignCenter)
                     self.tbl_input.setItem(r, c, item)
+        elif d.method == "Co-occurrence" and d.cooccurrence_frame is not None:
+            frame=d.cooccurrence_frame
+            self.tbl_input.setRowCount(len(frame));self.tbl_input.setColumnCount(len(frame.columns))
+            self.tbl_input.setHorizontalHeaderLabels([str(c) for c in frame.columns])
+            self.tbl_input.setVerticalHeaderLabels([str(i+1) for i in range(len(frame))])
+            for r in range(len(frame)):
+                for c in range(len(frame.columns)):
+                    value=frame.iat[r,c]
+                    self.tbl_input.setItem(r,c,QTableWidgetItem("" if pd.isna(value) else str(value)))
+            self.tbl_input.setEditTriggers(QAbstractItemView.NoEditTriggers)
         elif d.method in ("Regression", "CB-SEM", "PLS-SEM") and d.quant_frame is not None:
             frame=d.quant_frame
             self.tbl_input.setRowCount(len(frame)); self.tbl_input.setColumnCount(len(frame.columns))
@@ -156,7 +177,7 @@ class DataTab(QWidget):
         else:
             self.tbl_input.clear(); self.tbl_input.setRowCount(0); self.tbl_input.setColumnCount(0)
         self.tbl_input.blockSignals(False)
-        if d.method not in ("Regression", "CB-SEM", "PLS-SEM"):
+        if d.method not in ("Regression", "CB-SEM", "PLS-SEM", "Co-occurrence"):
             self.tbl_input.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self._busy = False
 
@@ -191,6 +212,8 @@ class DataTab(QWidget):
                 QMessageBox.warning(self, "Invalid DEMATEL matrix", str(exc))
         elif d.method == "Ranking" and d.ranking_values is not None:
             self._render_ranking()
+        elif d.method == "Co-occurrence" and d.cooccurrence_matrix is not None:
+            self._render_cooccurrence()
         elif d.method == "Ranking":
             self.tbl_res.clear(); self.tbl_res.setRowCount(0); self.tbl_res.setColumnCount(0)
         else:
@@ -214,6 +237,16 @@ class DataTab(QWidget):
             self.tbl_res.setItem(r, 0, QTableWidgetItem(name))
             for c, val in enumerate(d.ranking_values[r]):
                 self.tbl_res.setItem(r, c+1, QTableWidgetItem(f"{val:.7g}"))
+
+    def _render_cooccurrence(self):
+        d=self.state.data;labels=d.cooccurrence_labels;matrix=np.asarray(d.cooccurrence_matrix,float)
+        self.tbl_res.setColumnCount(len(labels)+1);self.tbl_res.setRowCount(len(labels))
+        self.tbl_res.setHorizontalHeaderLabels(["Code",*labels])
+        self.tbl_res.setVerticalHeaderLabels([str(i+1) for i in range(len(labels))])
+        for row,label in enumerate(labels):
+            self.tbl_res.setItem(row,0,QTableWidgetItem(label))
+            for col in range(len(labels)):
+                self.tbl_res.setItem(row,col+1,QTableWidgetItem(f"{matrix[row,col]:.0f}"))
 
     def _update_scale(self):
         a = self.state.data.matrix

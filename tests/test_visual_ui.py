@@ -2,6 +2,7 @@
 import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import unittest
+import numpy as np
 from unittest.mock import patch
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
@@ -15,6 +16,38 @@ from app.core.dematel import compute_dematel_from_total
 APP=QApplication.instance() or QApplication([])
 
 class AppTabGatingTests(unittest.TestCase):
+    def test_cooccurrence_import_and_interactive_heatmap(self):
+        w=MainWindow();w.resize(1400,850);w.show();APP.processEvents()
+        try:
+            w.data_tab.cb_mode.setCurrentIndex(5)
+            source=str(Path('Demo Data')/'Code_Cooccurrence_Demo.csv')
+            with patch('app.ui.data_tab.QFileDialog.getOpenFileName',return_value=(source,'CSV')):
+                w.data_tab.on_load()
+            APP.processEvents()
+            self.assertEqual(w.state.data.method,'Co-occurrence')
+            self.assertTrue(w.tabs.isTabEnabled(1))
+            self.assertEqual(w.state.data.cooccurrence_excerpt_count,6)
+            self.assertEqual(w.state.data.cooccurrence_matrix.shape,(4,4))
+            self.assertTrue(np.allclose(w.state.data.cooccurrence_matrix,w.state.data.cooccurrence_matrix.T))
+            self.assertEqual(w.data_tab.tbl_res.rowCount(),4)
+            w.tabs.setCurrentIndex(1);APP.processEvents()
+            visual=w.visual_tab
+            self.assertEqual(visual.cb_chart.currentText(),'Code co-occurrence heatmap')
+            self.assertEqual(len(visual._hover_nodes),16)
+            self.assertTrue(any(isinstance(item,pg.PColorMeshItem) for item in visual.plot.items()))
+            chart_x,chart_y=visual.plot.getViewBox().viewRange()
+            self.assertLessEqual(chart_x[0],0);self.assertGreaterEqual(chart_x[1],4)
+            self.assertLessEqual(chart_y[0],0);self.assertGreaterEqual(chart_y[1],4)
+            cell=visual._hover_nodes[0]
+            scene=visual.plot.getViewBox().mapViewToScene(pg.Point(cell['x'],cell['y']))
+            with patch('app.ui.visual_tab.QToolTip.showText') as show_tip:
+                visual._on_plot_mouse_moved(scene)
+                self.assertTrue(show_tip.called)
+            with patch('app.ui.visual_tab.QColorDialog.getColor',return_value=QColor('#2277aa')):
+                visual._choose_chart_color('primary')
+            self.assertEqual(visual.primary_chart_color.name(),'#2277aa')
+        finally:w.close()
+
     def test_shared_import_unlocks_only_matching_analysis_page(self):
         w=MainWindow();w.resize(1400,850);w.show();APP.processEvents()
         try:

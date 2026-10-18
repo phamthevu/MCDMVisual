@@ -44,6 +44,7 @@ class VisualTab(QWidget):
         settings_layout = QVBoxLayout(settings_page)
         box = QGroupBox("Figure settings")
         form = QFormLayout(box)
+        self._figure_form = form
         self.lbl_note = QLabel("Choose a chart, then adjust its options. Tick spacing, reference lines and legend are under Axes and key.")
         self.lbl_note.setWordWrap(True);self.lbl_note.setObjectName("visualHelp")
         form.addRow(self.lbl_note)
@@ -127,6 +128,11 @@ class VisualTab(QWidget):
         self.btn_clear_focus = QPushButton("Clear focus")
         self.btn_clear_focus.clicked.connect(self.clear_factor_focus)
         form.addRow("", self.btn_clear_focus)
+        self._cooccurrence_hidden_fields=(self.cb_metric,self.cb_x,self.cb_y,self.cb_direction,self.sp_min,
+            self.sp_topk,self.sp_topn,self.sp_nodes,self.sp_head,self.sp_pad_x,self.sp_pad_y,self.sp_jitter,
+            cause_row,effect_row,self.btn_secondary_chart_color,self.chk_arrows,self.chk_labels,
+            self.chk_line_rc0,self.chk_line_prom_mid,self.chk_w_opacity,self.chk_w_size,
+            self.chk_show_weight_labels,self.chk_show_rc_values,self.btn_reset_labels,self.btn_clear_focus)
         settings_layout.addWidget(box)
         settings_scroll = QScrollArea(); settings_scroll.setWidgetResizable(True); settings_scroll.setWidget(settings_page)
         settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -211,6 +217,10 @@ class VisualTab(QWidget):
         return row
 
     def _apply_axis_controls(self):
+        if self.state.data.method=="Co-occurrence" and self.state.data.cooccurrence_labels:
+            ticks=[[(i+.5,str(name)) for i,name in enumerate(self.state.data.cooccurrence_labels)]]
+            self.plot.getAxis("bottom").setTicks(ticks);self.plot.getAxis("left").setTicks(ticks)
+            return
         step = self.axis_tick.value()
         for name, idx in (("bottom", 0), ("left", 1)):
             axis = self.plot.getAxis(name)
@@ -500,6 +510,9 @@ class VisualTab(QWidget):
         if d.method == "DEMATEL":
             charts = ["INRM influence network", "Prominence–relation quadrants", "Influence heatmap", "Prominence ranking"]
             self.cb_metric.setEnabled(False); self.cb_direction.setEnabled(False)
+        elif d.method == "Co-occurrence":
+            charts = ["Code co-occurrence heatmap"]
+            self.cb_metric.setEnabled(False); self.cb_direction.setEnabled(False)
         else:
             charts = ["Score bar chart", "Score lollipop", "Ranked dot plot", "Multi-metric profile",
                       "Rank comparison", "Spearman rank correlation", "Kendall rank correlation"]
@@ -538,6 +551,12 @@ class VisualTab(QWidget):
         self.sp_topn.setEnabled(True)
         self.btn_reset_labels.setEnabled(d.method == "DEMATEL")
         self.btn_clear_focus.setEnabled(network)
+        is_cooccurrence=d.method=="Co-occurrence"
+        for widget in self._cooccurrence_hidden_fields:
+            visible=not is_cooccurrence
+            widget.setVisible(visible)
+            field_label=self._figure_form.labelForField(widget)
+            if field_label is not None:field_label.setVisible(visible)
 
     def on_metric_changed(self, *args):
         name = self.cb_metric.currentText().lower()
@@ -553,7 +572,8 @@ class VisualTab(QWidget):
         d = self.state.data
         # Keep the same viewport while switching chart types and presentation
         # options. A different method or imported dataset still auto-ranges.
-        chart_key = (d.method, id(d.matrix), id(d.ranking_values), tuple(d.labels), tuple(d.ranking_labels))
+        chart_key = (d.method, id(d.matrix), id(d.ranking_values), id(d.cooccurrence_matrix),
+                     tuple(d.labels), tuple(d.ranking_labels), tuple(d.cooccurrence_labels))
         preserve_view = (self.zoom_lock.isChecked() and chart_key == self._last_view_key
                          and self._last_view_key is not None)
         saved_view = self.plot.getViewBox().viewRange() if preserve_view else None
@@ -594,11 +614,16 @@ class VisualTab(QWidget):
             elif chart == "Spearman rank correlation": self._draw_rank_correlation("spearman")
             elif chart == "Kendall rank correlation": self._draw_rank_correlation("kendall")
             else: self._draw_ranking(chart)
+        elif d.method == "Co-occurrence" and d.cooccurrence_matrix is not None and d.cooccurrence_labels:
+            self._draw_cooccurrence()
         if saved_view is not None:
             self.plot.setXRange(*saved_view[0], padding=0)
             self.plot.setYRange(*saved_view[1], padding=0)
         elif not (d.method == "DEMATEL" and self.cb_chart.currentText() in ("INRM influence network", "Prominence–relation quadrants")):
             self.plot.autoRange(padding=.08)
+        if d.method=="Co-occurrence" and d.cooccurrence_labels:
+            count=len(d.cooccurrence_labels)
+            self.plot.setXRange(0,count,padding=.02);self.plot.setYRange(0,count,padding=.02)
         self._draw_custom_lines()
         self._draw_legend()
         title = self.ed_title.currentText().strip()
@@ -1030,6 +1055,40 @@ class VisualTab(QWidget):
         self._hover_nodes=[{"x":i+.5,"y":j+.5,"radius":12,"tip":f"<b>{d.labels[i]} → {d.labels[j]}</b><br>Total influence: {a[i,j]:.7g}"} for i in range(a.shape[0]) for j in range(a.shape[1])]
         self.plot.setLabel("bottom","Source factor"); self.plot.setLabel("left","Target factor")
         self.lbl_note.setText("Cell (i, j) is total influence from factor i to factor j.")
+
+    def _draw_cooccurrence(self):
+        d=self.state.data
+        counts=np.asarray(d.cooccurrence_matrix,float);labels=d.cooccurrence_labels
+        rgb=self.primary_chart_color.getRgb()[:3]
+        cmap=pg.ColorMap([0,1],[(248,250,252),rgb])
+        maximum=float(np.max(counts)) if counts.size else 0.0
+        n=len(labels)
+        x_grid,y_grid=np.meshgrid(np.arange(n+1,dtype=float),np.arange(n+1,dtype=float),indexing="ij")
+        image=pg.PColorMeshItem(x_grid,y_grid,counts,colorMap=cmap,levels=(0,maximum if maximum>0 else 1),edgecolors={"color":"#ffffff","width":0.6})
+        self.plot.addItem(image)
+        ticks=[[(i+.5,str(name)) for i,name in enumerate(labels)]]
+        bottom_axis=self.plot.getAxis("bottom");left_axis=self.plot.getAxis("left")
+        bottom_axis.setTicks(ticks);left_axis.setTicks(ticks)
+        left_axis.setWidth(min(230,max(130,max((len(str(name)) for name in labels),default=10)*7+24)))
+        bottom_axis.setHeight(78)
+        self.plot.setLabel("bottom","Code")
+        self.plot.setLabel("left","Code")
+        n=max(1,int(d.cooccurrence_excerpt_count))
+        self._hover_nodes=[]
+        show_values=len(labels)<=35
+        for row in range(len(labels)):
+            for col in range(len(labels)):
+                value=float(counts[row,col])
+                tip=(f"<b>{labels[row]} × {labels[col]}</b><br>"
+                     f"Shared excerpts: {value:.0f}<br>"
+                     f"Excerpt dataset: {n}")
+                x,y=col+.5,row+.5
+                self._hover_nodes.append({"x":x,"y":y,"radius":10,"tip":tip})
+                if show_values:
+                    ink="#fff" if maximum and value/maximum>=.58 else "#172033"
+                    text=pg.TextItem(f"{value:.0f}",color=ink,anchor=(.5,.5))
+                    text.setPos(x,y);self.plot.addItem(text)
+        self.lbl_note.setText(f"Code co-occurrence · {n} distinct excerpts · each cell counts excerpt IDs containing both codes. Hover over a cell for its count.")
 
     def _draw_prominence(self):
         p, rel, weights=self._dematel_arrays(); d=self.state.data

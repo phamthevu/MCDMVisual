@@ -28,10 +28,14 @@ Choose Regression in Data and import a sheet with numeric predictor X and observ
 
 Choose CB-SEM or PLS-SEM in Data and import a sheet with `Source`, `Target`, and numeric `Estimate` columns for a structural path diagram. For measurement/validity metric charts, use one row per metric with a text label and numeric value. Existing p-values, confidence intervals, alpha, CR, AVE, or HTMT values can remain in the workbook; this tool only plots supplied values.
 
+### Code co-occurrence
+
+Select **Code co-occurrence (excerpt coding)** in Data. The app accepts a wide sheet with `Excerpt ID` followed by one `0/1` presence column per code, or a long sheet with `Excerpt ID` and `Code` columns (one assignment per row). Repeated excerpt/code assignments count once. Each heatmap cell counts distinct excerpt IDs containing both codes; diagonal cells show the excerpt count for each code. Hover over a cell to see its count. This counts codes assigned to the same excerpt ID; it does not infer overlap from media time ranges or transcript spans. Use `Template/Code_Cooccurrence_Template.csv` or `Demo Data/Code_Cooccurrence_Demo.csv` to try the chart.
+
 ## Template and demo files
 
-- `Template/`: blank colored Excel input sheets.
-- `Demo Data/`: populated DEMATEL, ranking, regression, and SEM examples.
+- `Template/`: blank input sheets, including the code co-occurrence CSV template.
+- `Demo Data/`: populated DEMATEL, ranking, regression, SEM, and co-occurrence examples.
 
 ## Run from source
 
@@ -50,7 +54,7 @@ Run `build_windows.bat`. It creates `.build-venv`, installs dependencies and PyI
 
 ## Test
 
-The UI tests include removal of the XY Drawing tab, SEM arrowheads and hover data, configurable chart colors, infinite horizontal/vertical lines and clipped full-chart function lines, arrow opacity/dash/size ranges, legend dropdowns, Cause/Effect marker settings, import-mode gating, resizable settings/preview layout, and zoom retention while switching charts:
+The UI tests include code co-occurrence parsing and heatmap hover, removal of the XY Drawing tab, SEM arrowheads and hover data, configurable chart colors, infinite horizontal/vertical lines and clipped full-chart function lines, arrow opacity/dash/size ranges, legend dropdowns, Cause/Effect marker settings, import-mode gating, resizable settings/preview layout, and zoom retention while switching charts:
 
 ```bash
 QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v

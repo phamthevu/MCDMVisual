@@ -28,7 +28,7 @@ class MainWindow(QMainWindow):
 
     def _update_tab_access(self):
         data=self.state.data
-        is_mcdm=data.method in ("DEMATEL","Ranking")
+        is_mcdm=data.method in ("DEMATEL","Ranking") or (data.method=="Co-occurrence" and data.cooccurrence_matrix is not None)
         is_quant=data.method in ("Regression","CB-SEM","PLS-SEM") and data.quant_type==data.method and data.quant_frame is not None
         self.tabs.setTabEnabled(1,is_mcdm)
         self.tabs.setTabEnabled(2,is_quant)
