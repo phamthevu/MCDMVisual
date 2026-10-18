@@ -59,20 +59,40 @@ class AppTabGatingTests(unittest.TestCase):
             v=w.visual_tab
             d=w.state.data;d.method='DEMATEL';d.labels,d.matrix=load_total_influence_matrix(Path('Demo Data')/'DEMATEL_Demo.xlsx')
             d.dematel_table=compute_dematel_from_total(d.matrix,d.labels);w.state.emit_changed();APP.processEvents()
-            v.custom_lines=[(0,0,1,1,"old", "#ff00ff",40,0)]
+            v.custom_lines=[("horizontal",0,0,"old", "#ff00ff",40,0)]
             def accept_line_dialog():
                 dialog=APP.activeModalWidget();table=dialog.findChild(QTableWidget);table.setCurrentCell(0,0)
                 next(b for b in dialog.findChildren(QPushButton) if b.text()=="Delete selected line").click()
-                next(b for b in dialog.findChildren(QPushButton) if b.text()=="Add line").click()
-                for col,value in enumerate(("1","2","4","8","two-point function","#00aa77","25","13")):
+                with patch('app.ui.visual_tab.QInputDialog.getItem',return_value=("Function (y = ax + b)",True)):
+                    next(b for b in dialog.findChildren(QPushButton) if b.text()=="Add line…").click()
+                combo=table.cellWidget(0,0);self.assertEqual(combo.currentData(),"function")
+                self.assertFalse(table.item(0,1).flags() & Qt.ItemFlag.ItemIsEditable)
+                self.assertTrue(table.item(0,2).flags() & Qt.ItemFlag.ItemIsEditable)
+                self.assertTrue(table.item(0,3).flags() & Qt.ItemFlag.ItemIsEditable)
+                for col,value in ((2,"1"),(3,"-0.8"),(4,"linear function"),(5,"#00aa77"),(6,"25"),(7,"13")):
                     table.item(0,col).setText(value)
                 with patch('app.ui.visual_tab.QColorDialog.getColor',return_value=QColor("#00aa77")):
                     v._choose_line_color(table,0,5,dialog)
                 self.assertEqual(table.item(0,5).background().color().name(),"#00aa77")
                 dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Ok).click()
             QTimer.singleShot(0,accept_line_dialog);v._manage_custom_lines()
-            self.assertEqual(v.custom_lines,[(1.0,2.0,4.0,8.0,"two-point function","#00aa77",25,13)])
-            self.assertTrue(any("two-point function" in edge.get("tip","") for edge in v._hover_edges))
+            self.assertEqual(v.custom_lines,[("function",1.0,-0.8,"linear function","#00aa77",25,13)])
+            self.assertTrue(any("linear function" in edge.get("tip","") for edge in v._hover_edges))
+            self.assertEqual(v._normalize_reference_line((0,4,1,4,"old horizontal","#333333",20,0)),
+                             ("horizontal",4.0,0.0,"old horizontal","#333333",20,0))
+            self.assertEqual(v._normalize_reference_line((3,0,3,1,"old vertical","#333333",20,0)),
+                             ("vertical",3.0,0.0,"old vertical","#333333",20,0))
+            v.custom_lines=[("horizontal",-.02,0,"Horizontal reference","#aa2233",30,0),
+                            ("vertical",.5,0,"Vertical reference","#22aa33",30,0),
+                            ("function",.1,-.1,"Linear reference","#2233aa",30,0)]
+            v.refresh_from_state();APP.processEvents()
+            self.assertEqual(sum(isinstance(entry["item"],pg.InfiniteLine) for entry in v._reference_line_items),2)
+            linear=next(entry for entry in v._reference_line_items if entry["kind"]=="function")
+            x_range,y_range=v.plot.getViewBox().viewRange()
+            self.assertLessEqual(min(linear["item"].getData()[0]),x_range[1])
+            self.assertGreaterEqual(max(linear["item"].getData()[0]),x_range[0])
+            for equation in ("y = -0.02", "x = 0.5", "y = 0.1x -0.1"):
+                self.assertTrue(any(equation in edge.get("tip","") for edge in v._hover_edges),equation)
             self.assertFalse(v.chk_show_legend.isChecked());self.assertIsNone(v._legend)
             v.chk_show_legend.setChecked(True);APP.processEvents()
             self.assertIsNotNone(v._legend)
@@ -106,7 +126,8 @@ class AppTabGatingTests(unittest.TestCase):
                 dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Ok).click()
             QTimer.singleShot(0,remove_default_and_extra);v._configure_legend()
             self.assertIn("base:cause",v.legend_suppressed);self.assertEqual(v.legend_extras,[])
-            self.assertLessEqual(v.settings_tabs.width(),320)
+            self.assertGreaterEqual(v.settings_tabs.width(),300)
+            self.assertGreaterEqual(v.content_splitter.handleWidth(),5)
             self.assertEqual(v.settings_tabs.widget(0).horizontalScrollBar().maximum(),0)
             self.assertEqual(v.sp_head.minimum(),1);self.assertEqual(v.sp_head.maximum(),50)
             v.zoom_lock.setChecked(False);v.cb_chart.setCurrentText("Influence heatmap");APP.processEvents()
@@ -144,7 +165,7 @@ class AppTabGatingTests(unittest.TestCase):
                 v.cb_chart.setCurrentIndex(index);APP.processEvents();locked_after=v.plot.getViewBox().viewRange()
                 for axis in range(2):
                     for bound in range(2):self.assertAlmostEqual(locked_before[axis][bound],locked_after[axis][bound],places=5)
-            self.assertLessEqual(v.settings_tabs.width(),320)
+            self.assertGreaterEqual(v.settings_tabs.width(),300)
             scroll=v.settings_tabs.widget(0)
             self.assertEqual(scroll.horizontalScrollBar().maximum(),0)
             if v.tbl_seg.rowCount():

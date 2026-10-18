@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QGroupBox, QFo
     QComboBox, QCheckBox, QDoubleSpinBox, QSpinBox, QLabel, QPushButton,
     QFileDialog, QMessageBox, QInputDialog, QToolTip, QGraphicsItem,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QScrollArea, QDialog, QDialogButtonBox, QLineEdit, QColorDialog)
+    QScrollArea, QDialog, QDialogButtonBox, QLineEdit, QColorDialog, QSplitter)
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QCursor, QFont, QColor
 from app.core.ranking import pairwise_rank_correlations, directions_from_names
@@ -33,9 +33,13 @@ class VisualTab(QWidget):
         super().__init__()
         self.state = state
         root = QHBoxLayout(self)
+        root.setContentsMargins(6, 6, 6, 6)
+        self.content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.content_splitter.setChildrenCollapsible(False)
+        self.content_splitter.setHandleWidth(8)
         self.settings_tabs = QTabWidget()
-        self.settings_tabs.setMinimumWidth(290)
-        self.settings_tabs.setMaximumWidth(320)
+        self.settings_tabs.setMinimumWidth(300)
+        self.settings_tabs.setMaximumWidth(16777215)
         settings_page = QWidget()
         settings_layout = QVBoxLayout(settings_page)
         box = QGroupBox("Figure settings")
@@ -132,10 +136,10 @@ class VisualTab(QWidget):
         bin_help=QLabel("Set each link interval's range and color. Opacity runs 1–50 (higher is darker); Dash runs 0–50 (0 solid, then dashed, dotted, or dash-dot). Double-click a color cell to choose it.");bin_help.setWordWrap(True);bin_layout.addWidget(bin_help)
         self.tbl_seg = QTableWidget(0, 5)
         self.tbl_seg.setHorizontalHeaderLabels(["Low", "High", "Opacity 1–50", "Dash 0–50", "Color"])
-        self.tbl_seg.setMinimumWidth(0);self.tbl_seg.setMaximumWidth(300)
+        self.tbl_seg.setMinimumWidth(0);self.tbl_seg.setMaximumWidth(16777215)
         self.tbl_seg.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tbl_seg.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        for col,width in enumerate((54,54,56,42,70)):self.tbl_seg.setColumnWidth(col,width)
+        for col,width in enumerate((62,62,88,80,75)):self.tbl_seg.setColumnWidth(col,width)
         self.tbl_seg.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_seg.itemChanged.connect(self._on_bin_table_changed)
         self.tbl_seg.cellDoubleClicked.connect(self._choose_bin_color)
@@ -144,7 +148,7 @@ class VisualTab(QWidget):
         bin_page.setMinimumWidth(0)
         bin_scroll=QScrollArea();bin_scroll.setWidgetResizable(True);bin_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff);bin_scroll.setWidget(bin_page)
         self.settings_tabs.addTab(bin_scroll, "Arrows")
-        root.addWidget(self.settings_tabs)
+        self.content_splitter.addWidget(self.settings_tabs)
 
         self.zoom_locked = True
         self.custom_lines = []
@@ -167,7 +171,7 @@ class VisualTab(QWidget):
         self.axis_tick.setToolTip("Distance between adjacent tick marks on both axes. Set Auto to let the chart choose.")
         axis_form.addRow("Tick step", self.axis_tick)
         self.apply_axis_btn = QPushButton("Apply tick spacing"); self.apply_axis_btn.clicked.connect(self._apply_axis_controls); axis_form.addRow("", self.apply_axis_btn)
-        self.btn_manage_lines = QPushButton("Add / remove two-point lines…"); self.btn_manage_lines.clicked.connect(self._manage_custom_lines);axis_form.addRow("Reference lines",self.btn_manage_lines)
+        self.btn_manage_lines = QPushButton("Add / remove reference lines…"); self.btn_manage_lines.clicked.connect(self._manage_custom_lines);axis_form.addRow("Reference lines",self.btn_manage_lines)
         self.chk_show_legend=QCheckBox("Show chart legend");self.chk_show_legend.setChecked(False);self.chk_show_legend.toggled.connect(self._on_legend_toggled);axis_form.addRow("Legend",self.chk_show_legend)
         self.btn_legend_config = QPushButton("Manage legend items…"); self.btn_legend_config.clicked.connect(self._configure_legend); axis_form.addRow("", self.btn_legend_config)
         self.lbl_axis_range = QLabel("Axis range: —"); self.lbl_axis_range.setWordWrap(True);self.lbl_axis_range.setMinimumWidth(0); axis_form.addRow("", self.lbl_axis_range)
@@ -178,7 +182,11 @@ class VisualTab(QWidget):
         self.plot = pg.PlotWidget(background="w")
         self.plot.showGrid(x=True, y=True, alpha=.2)
         self.plot.setMenuEnabled(True)
-        root.addWidget(self.plot, 1)
+        self.content_splitter.addWidget(self.plot)
+        self.content_splitter.setStretchFactor(0, 0)
+        self.content_splitter.setStretchFactor(1, 1)
+        self.content_splitter.setSizes([420, 900])
+        root.addWidget(self.content_splitter, 1)
         self._selected_idx = None
         self._hover_nodes = []
         self._hover_edges = []
@@ -192,6 +200,8 @@ class VisualTab(QWidget):
         self.zoom_in.clicked.connect(lambda: self.plot.getViewBox().scaleBy((.8, .8)))
         self.zoom_out.clicked.connect(lambda: self.plot.getViewBox().scaleBy((1.25, 1.25)))
         self.plot.scene().sigMouseMoved.connect(self._on_plot_mouse_moved)
+        self._reference_line_items = []
+        self.plot.getViewBox().sigRangeChanged.connect(self._update_reference_lines_for_view)
         self.refresh_from_state()
 
     @staticmethod
@@ -308,49 +318,95 @@ class VisualTab(QWidget):
         button.setText(f"{'Primary' if which=='primary' else 'Secondary'}: {color.name()}")
         self._style_color_button(button,color);self.refresh_from_state()
 
+    @staticmethod
+    def _normalize_reference_line(line):
+        """Return (kind, value/slope, intercept, label, color, opacity, dash)."""
+        if len(line) == 7 and line[0] in ("horizontal", "vertical", "function"):
+            kind, value, intercept, label, color, opacity, dash = line
+            return (kind, float(value), float(intercept), str(label), str(color), int(opacity), int(dash))
+        # Read older saved two-point lines and preserve their plotted function.
+        if len(line) >= 8:
+            x1, y1, x2, y2, label, color, opacity, dash = line[:8]
+            if abs(float(x2)-float(x1)) < 1e-12:
+                return ("vertical", float(x1), 0.0, str(label), str(color), int(opacity), int(dash))
+            slope = (float(y2)-float(y1))/(float(x2)-float(x1))
+            intercept = float(y1)-slope*float(x1)
+            if abs(slope) < 1e-12:
+                return ("horizontal", float(y1), 0.0, str(label), str(color), int(opacity), int(dash))
+            return ("function", slope, intercept, str(label), str(color), int(opacity), int(dash))
+        # Support the earliest compact (axis, value, label, color?) form.
+        axis, value, label, *extra = line
+        return ("vertical" if axis == "v" else "horizontal", float(value), 0.0,
+                str(label), str(extra[0] if extra else "#7c3aed"), 40, 0)
+
+    @staticmethod
+    def _line_kind_combo(kind="horizontal"):
+        combo=QComboBox()
+        combo.addItem("Horizontal (y = c)", "horizontal")
+        combo.addItem("Vertical (x = c)", "vertical")
+        combo.addItem("Function (y = ax + b)", "function")
+        combo.setCurrentIndex(max(0, combo.findData(kind)))
+        return combo
+
     def _manage_custom_lines(self):
-        dialog=QDialog(self);dialog.setWindowTitle("Manage two-point reference lines");dialog.resize(1050,460);layout=QVBoxLayout(dialog)
-        table=QTableWidget(len(self.custom_lines),8);table.setHorizontalHeaderLabels(["X₁","Y₁","X₂","Y₂","Label","Color","Opacity 1–50","Dash 0–50"])
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        for col,width in enumerate((74,74,74,74,170,105,105,90)):table.setColumnWidth(col,width)
-        for row,line in enumerate(self.custom_lines):
-            if len(line)>=7:
-                x1,y1,x2,y2,label,color,opacity,dash=line
-            else:
-                axis,value,label,*extra=line;color=extra[0] if extra else "#7c3aed"
-                x1,y1,x2,y2=(value,0,value,1) if axis=="v" else (0,value,1,value)
-                opacity,dash=(40,0)
-            values=(x1,y1,x2,y2,label,color,opacity,dash)
-            for col,value in enumerate(values):
-                item=QTableWidgetItem(str(value));table.setItem(row,col,item)
-                if col==5:item.setBackground(QColor(str(value)))
+        dialog=QDialog(self);dialog.setWindowTitle("Manage reference lines");dialog.resize(1060,500);layout=QVBoxLayout(dialog)
+        table=QTableWidget(0,8);table.setHorizontalHeaderLabels(["Line type","c","a","b","Label","Color","Opacity 1–50","Dash 0–50"])
+        header=table.horizontalHeader();header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for col,width in enumerate((210,82,82,82,170,100,110,90)):table.setColumnWidth(col,width)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        def update_row(row):
+            combo=table.cellWidget(row,0)
+            if combo is None:return
+            is_function=combo.currentData()=="function"
+            for col, enabled in ((1,not is_function),(2,is_function),(3,is_function)):
+                item=table.item(row,col)
+                if item is None:continue
+                item.setFlags((item.flags() | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable)
+                              if enabled else (item.flags() & ~Qt.ItemFlag.ItemIsEnabled & ~Qt.ItemFlag.ItemIsEditable))
+                if not enabled:item.setText("")
+            table.setVerticalHeaderItem(row,QTableWidgetItem("y=ax+b" if is_function else ("y=c" if combo.currentData()=="horizontal" else "x=c")))
+        def add_row(kind="horizontal", value="0", intercept="0", label="", color="#7c3aed", opacity="40", dash="0"):
+            row=table.rowCount();table.insertRow(row)
+            combo=self._line_kind_combo(kind);table.setCellWidget(row,0,combo)
+            c_text=str(value) if kind!="function" else ""
+            a_text=str(value) if kind=="function" else ""
+            b_text=str(intercept) if kind=="function" else ""
+            for col,text in enumerate((c_text,a_text,b_text,label,color,str(opacity),str(dash)),start=1):
+                item=QTableWidgetItem(text);table.setItem(row,col,item)
+                if col==5:item.setBackground(QColor(text))
+            combo.currentIndexChanged.connect(lambda _index,r=row:update_row(r))
+            update_row(row)
+        for raw_line in self.custom_lines:
+            kind,value,intercept,label,color,opacity,dash=self._normalize_reference_line(raw_line)
+            add_row(kind,value,intercept,label,color,opacity,dash)
         table.cellDoubleClicked.connect(lambda row,col:self._choose_line_color(table,row,col,dialog) if col==5 else None)
-        layout.addWidget(QLabel("Enter two points (x₁,y₁) and (x₂,y₂). The app draws the straight function through them; equal X values create a vertical line. Opacity: 1–50. Dash: 0 solid, then dashed/dotted/dash-dot up to 50."));layout.addWidget(table)
-        buttons=QHBoxLayout();add=QPushButton("Add line");remove=QPushButton("Delete selected line");buttons.addWidget(add);buttons.addWidget(remove);layout.addLayout(buttons)
-        add.clicked.connect(lambda:self._add_reference_line_row(table))
+        help_text=QLabel("Horizontal: enter c for y = c. Vertical: enter c for x = c. Function: enter a and b for y = ax + b. Inactive parameter columns are locked. Lines extend across the full chart; leave Label blank to show the equation. Opacity: 1–50; Dash: 0 solid, 1–50 dashed/dotted.")
+        help_text.setWordWrap(True);layout.addWidget(help_text);layout.addWidget(table)
+        buttons=QHBoxLayout();add=QPushButton("Add line…");remove=QPushButton("Delete selected line");buttons.addWidget(add);buttons.addWidget(remove);layout.addLayout(buttons)
+        def ask_and_add():
+            names=["Horizontal (y = c)","Vertical (x = c)","Function (y = ax + b)"]
+            choice,ok=QInputDialog.getItem(dialog,"Add reference line","Choose line type:",names,0,False)
+            if ok:add_row({names[0]:"horizontal",names[1]:"vertical",names[2]:"function"}[choice])
+        add.clicked.connect(ask_and_add)
         remove.clicked.connect(lambda:table.removeRow(table.currentRow()) if table.currentRow()>=0 else None)
         box=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel);layout.addWidget(box);box.accepted.connect(dialog.accept);box.rejected.connect(dialog.reject)
         if dialog.exec()==QDialog.DialogCode.Accepted:
             lines=[]
             for row in range(table.rowCount()):
-                try:points=[float(table.item(row,col).text()) for col in range(4)]
+                kind=table.cellWidget(row,0).currentData()
+                value_column=2 if kind=="function" else 1
+                try:value=float(table.item(row,value_column).text())
                 except (ValueError,AttributeError):continue
-                if np.hypot(points[2]-points[0],points[3]-points[1])<1e-12:continue
+                try:intercept=float(table.item(row,3).text()) if kind=="function" else 0.0
+                except (ValueError,AttributeError):continue
                 label=table.item(row,4).text().strip() if table.item(row,4) else ""
                 color=table.item(row,5).text().strip() if table.item(row,5) else "#7c3aed"
                 try:opacity=max(1,min(50,int(float(table.item(row,6).text()))))
                 except (ValueError,AttributeError):opacity=40
                 try:dash=max(0,min(50,int(float(table.item(row,7).text()))))
                 except (ValueError,AttributeError):dash=0
-                lines.append((*points,label,color if QColor(color).isValid() else "#7c3aed",opacity,dash))
+                lines.append((kind,value,intercept,label,color if QColor(color).isValid() else "#7c3aed",opacity,dash))
             self.custom_lines=lines;self.refresh_from_state()
-
-    @staticmethod
-    def _add_reference_line_row(table):
-        row=table.rowCount();table.insertRow(row)
-        for col,value in enumerate(("0","0","1","1","","#7c3aed","40","0")):
-            item=QTableWidgetItem(value);table.setItem(row,col,item)
-            if col==5:item.setBackground(QColor(value))
 
     def _choose_line_color(self,table,row,column,dialog):
         item=table.item(row,column);initial=QColor(item.text()) if item and QColor(item.text()).isValid() else QColor("#7c3aed")
@@ -360,24 +416,75 @@ class VisualTab(QWidget):
             item.setText(color.name());item.setBackground(color)
 
     def _draw_custom_lines(self):
-        for line in self.custom_lines:
-            if len(line)<7:continue
-            x1,y1,x2,y2,label,color,opacity,*dash=line;dash=dash[0] if dash else 0
+        self._reference_line_items=[]
+        for raw_line in self.custom_lines:
+            try:kind,value,intercept,label,color,opacity,dash=self._normalize_reference_line(raw_line)
+            except (ValueError,TypeError):continue
             if not QColor(color).isValid():color="#7c3aed"
             x_range,y_range=self.plot.getViewBox().viewRange()
-            if abs(x2-x1)<1e-12:
-                draw_x=[float(x1),float(x1)];draw_y=[float(y_range[0]),float(y_range[1])]
-                equation=f"x = {x1:.5g}"
-            else:
-                slope=(y2-y1)/(x2-x1);intercept=y1-slope*x1
-                draw_x=[float(x_range[0]),float(x_range[1])];draw_y=[slope*draw_x[0]+intercept,slope*draw_x[1]+intercept]
-                equation=f"y = {slope:.5g}x {intercept:+.5g}"
             qcolor=QColor(color);qcolor.setAlphaF(max(1,min(50,int(opacity)))/50)
             pen=pg.mkPen(color=qcolor,width=1.5,style=self._dash_style(dash))
-            item=pg.PlotDataItem(draw_x,draw_y,pen=pen);self.plot.addItem(item)
+            if kind=="vertical":
+                equation=f"x = {value:.5g}"
+                item=pg.InfiniteLine(pos=value,angle=0,pen=pen,movable=False,label=None)
+            elif kind=="horizontal" or abs(value)<1e-12:
+                equation=f"y = {value:.5g}" if kind=="horizontal" else f"y = {value:.5g}x {intercept:+.5g}"
+                level=value if kind=="horizontal" else intercept
+                item=pg.InfiniteLine(pos=level,angle=90,pen=pen,movable=False,label=None)
+            else:
+                equation=f"y = {value:.5g}x {intercept:+.5g}"
+                draw_x,draw_y=self._clip_function_to_view(value,intercept,x_range,y_range)
+                if len(draw_x)<2:continue
+                # The endpoints are clipped to the visible plot rectangle below;
+                # leave PlotDataItem's own clipToView off for PyQtGraph compatibility.
+                item=pg.PlotDataItem(draw_x,draw_y,pen=pen,connect="all")
+                item.setZValue(10);item.setCurveClickable(True)
             line_label=label or equation
-            text=pg.TextItem(line_label,color=color,anchor=(0,.5));text.setPos((draw_x[0]+draw_x[1])/2,(draw_y[0]+draw_y[1])/2);self.plot.addItem(text)
-            self._hover_edges.append({"view_points":[pg.Point(draw_x[0],draw_y[0]),pg.Point(draw_x[1],draw_y[1])],"tip":f"<b>{line_label}</b><br>{equation}<br>Through ({x1:g}, {y1:g}) and ({x2:g}, {y2:g})"})
+            self.plot.addItem(item,ignoreBounds=isinstance(item,pg.InfiniteLine))
+            text=pg.TextItem(line_label,color=color,anchor=(0,.5));self.plot.addItem(text)
+            hover={"view_points":[] ,"tip":f"<b>{line_label}</b><br>{equation}"}
+            self._hover_edges.append(hover)
+            self._reference_line_items.append({"kind":kind,"value":value,"intercept":intercept,"item":item,"label":text,"hover":hover})
+        self._update_reference_lines_for_view()
+
+    @staticmethod
+    def _clip_function_to_view(slope,intercept,x_range,y_range):
+        """Find the intersections of y=ax+b with the current plot rectangle."""
+        xmin,xmax=map(float,x_range);ymin,ymax=map(float,y_range);points=[]
+        for x in (xmin,xmax):
+            y=slope*x+intercept
+            if ymin-1e-9<=y<=ymax+1e-9:points.append((x,y))
+        if abs(slope)>1e-15:
+            for y in (ymin,ymax):
+                x=(y-intercept)/slope
+                if xmin-1e-9<=x<=xmax+1e-9:points.append((x,y))
+        unique=[]
+        for point in points:
+            if not any(math.hypot(point[0]-other[0],point[1]-other[1])<1e-9 for other in unique):unique.append(point)
+        if len(unique)<2:return [],[]
+        first,second=max(((a,b) for i,a in enumerate(unique) for b in unique[i+1:]),key=lambda pair:math.hypot(pair[0][0]-pair[1][0],pair[0][1]-pair[1][1]))
+        return [first[0],second[0]],[first[1],second[1]]
+
+    def _update_reference_lines_for_view(self,*_args):
+        if not self._reference_line_items:return
+        x_range,y_range=self.plot.getViewBox().viewRange()
+        for entry in self._reference_line_items:
+            kind,value,intercept=entry["kind"],entry["value"],entry["intercept"]
+            if kind=="vertical":
+                points=[(value,float(y_range[0])),(value,float(y_range[1]))]
+                label_pos=(value,(float(y_range[0])+float(y_range[1]))/2)
+            elif kind=="horizontal" or abs(value)<1e-12:
+                level=value if kind=="horizontal" else intercept
+                points=[(float(x_range[0]),level),(float(x_range[1]),level)]
+                label_pos=((float(x_range[0])+float(x_range[1]))/2,level)
+            else:
+                xs,ys=self._clip_function_to_view(value,intercept,x_range,y_range)
+                points=list(zip(xs,ys))
+                if len(points)<2:continue
+                label_pos=((points[0][0]+points[1][0])/2,(points[0][1]+points[1][1])/2)
+                entry["item"].setData(xs,ys)
+            entry["label"].setPos(*label_pos)
+            entry["hover"]["view_points"]=[pg.Point(*points[0]),pg.Point(*points[1])] if len(points)>=2 else []
 
     @staticmethod
     def _dash_style(value):
