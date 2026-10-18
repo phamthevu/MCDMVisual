@@ -5,7 +5,7 @@ import pandas as pd
 
 
 def _read_labeled_square(path: str, sheet=0):
-    df = pd.read_excel(path, sheet_name=sheet, header=None)
+    df = pd.read_csv(path, header=None) if str(path).lower().endswith(".csv") else pd.read_excel(path, sheet_name=sheet, header=None)
     if df.shape[0] < 2 or df.shape[1] < 2:
         raise ValueError("Expected a labeled matrix: labels in the first row and first column.")
     headers = df.iloc[0, 1:].dropna().astype(str).str.strip().tolist()

@@ -1,8 +1,9 @@
 from __future__ import annotations
 import numpy as np
+import pandas as pd
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QTableWidget, QTableWidgetItem, QGroupBox, QFormLayout, QLabel,
-    QAbstractItemView, QComboBox, QMessageBox, QHeaderView)
+    QAbstractItemView, QComboBox, QMessageBox, QHeaderView, QInputDialog)
 from PySide6.QtCore import Qt
 from app.core.io_excel import load_total_influence_matrix, load_ranking_results
 from app.core.dematel import compute_dematel_from_total
@@ -18,7 +19,8 @@ class DataTab(QWidget):
         bar = QHBoxLayout()
         bar.addWidget(QLabel("Analysis"))
         self.cb_mode = QComboBox()
-        self.cb_mode.addItems(["DEMATEL INRM (total influence T)", "Ranking results (TOPSIS / other methods)"])
+        self.cb_mode.addItems(["DEMATEL INRM (total influence T)", "Ranking results (TOPSIS / other methods)",
+                               "Regression results", "CB-SEM results", "PLS-SEM results"])
         self.cb_mode.currentIndexChanged.connect(self.on_mode_changed)
         bar.addWidget(self.cb_mode)
         self.btn_load = QPushButton("Import Excel / CSV")
@@ -29,7 +31,7 @@ class DataTab(QWidget):
 
         body = QHBoxLayout()
         root.addLayout(body, 1)
-        input_box = QGroupBox("Input data — editable")
+        input_box = QGroupBox("Input & preview")
         input_layout = QVBoxLayout(input_box)
         self.lbl_input = QLabel("DEMATEL input: final total influence matrix T (numeric values).")
         input_layout.addWidget(self.lbl_input)
@@ -63,13 +65,21 @@ class DataTab(QWidget):
         form.addRow("Influence bins", self.spin_bins)
         form.addRow("Bin edges", self.lbl_edges)
         side.addWidget(vis_box, 1)
+        self.scale_box = vis_box
         self._busy = False
 
     def on_mode_changed(self, index):
-        self.state.data.method = "DEMATEL" if index == 0 else "Ranking"
+        self.state.data.method = ["DEMATEL", "Ranking", "Regression", "CB-SEM", "PLS-SEM"][index]
         is_dematel = index == 0
-        self.lbl_input.setText("DEMATEL input: final total influence matrix T (numeric values)." if is_dematel else
-                               "Ranking input: alternative in column 1; one or more final numeric result columns after it.")
+        prompts = ["DEMATEL input: final total influence matrix T (numeric values).",
+                   "Ranking input: alternative in column 1; one or more final numeric result columns after it.",
+                   "Regression: import a sheet with observed X/Y columns; predicted/residual columns are optional.",
+                   "CB-SEM: import path estimates; use Source, Target, Estimate columns. Fit indices may be in the same sheet.",
+                   "PLS-SEM: import path estimates; use Source, Target, Estimate columns. Loadings/validity metrics can be in the sheet."]
+        self.lbl_input.setText(prompts[index])
+        self.scale_box.setEnabled(is_dematel)
+        if index < 2:
+            self.state.data.quant_type = ""
         self._render_input()
         self._recompute()
         self.state.emit_changed()
@@ -80,15 +90,30 @@ class DataTab(QWidget):
         if not path:
             return
         try:
+            sheet = 0
+            if not path.lower().endswith(".csv"):
+                with pd.ExcelFile(path) as workbook:
+                    names = workbook.sheet_names
+                if len(names) > 1:
+                    selected, ok = QInputDialog.getItem(self, "Select worksheet", "Worksheet", names, 0, False)
+                    if not ok: return
+                    sheet = selected
             if self.state.data.method == "DEMATEL":
-                labels, matrix = load_total_influence_matrix(path)
+                labels, matrix = load_total_influence_matrix(path, sheet=sheet)
                 self.state.data.labels = labels
                 self.state.data.matrix = matrix
-            else:
-                names, columns, values = load_ranking_results(path)
+            elif self.state.data.method == "Ranking":
+                names, columns, values = load_ranking_results(path, sheet=sheet)
                 self.state.data.ranking_labels = names
                 self.state.data.ranking_columns = columns
                 self.state.data.ranking_values = values
+            else:
+                if path.lower().endswith(".csv"):
+                    self.state.data.quant_frame=pd.read_csv(path)
+                else:
+                    with pd.ExcelFile(path) as workbook:
+                        self.state.data.quant_frame=pd.read_excel(workbook,sheet_name=sheet)
+                self.state.data.quant_type = self.state.data.method
             self._render_input()
             self._recompute()
             self.state.emit_changed()
@@ -117,9 +142,22 @@ class DataTab(QWidget):
                 for c in range(a.shape[1]):
                     item = QTableWidgetItem(f"{a[r,c]:.7g}"); item.setTextAlignment(Qt.AlignCenter)
                     self.tbl_input.setItem(r, c, item)
+        elif d.method in ("Regression", "CB-SEM", "PLS-SEM") and d.quant_frame is not None:
+            frame=d.quant_frame
+            self.tbl_input.setRowCount(len(frame)); self.tbl_input.setColumnCount(len(frame.columns))
+            self.tbl_input.setHorizontalHeaderLabels([str(c) for c in frame.columns])
+            self.tbl_input.setVerticalHeaderLabels([str(i+1) for i in range(len(frame))])
+            for r in range(len(frame)):
+                for c in range(len(frame.columns)):
+                    value=frame.iat[r,c]
+                    text="" if pd.isna(value) else str(value)
+                    self.tbl_input.setItem(r,c,QTableWidgetItem(text))
+            self.tbl_input.setEditTriggers(QAbstractItemView.NoEditTriggers)
         else:
             self.tbl_input.clear(); self.tbl_input.setRowCount(0); self.tbl_input.setColumnCount(0)
         self.tbl_input.blockSignals(False)
+        if d.method not in ("Regression", "CB-SEM", "PLS-SEM"):
+            self.tbl_input.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self._busy = False
 
     def on_cell_changed(self, item):
@@ -153,6 +191,8 @@ class DataTab(QWidget):
                 QMessageBox.warning(self, "Invalid DEMATEL matrix", str(exc))
         elif d.method == "Ranking" and d.ranking_values is not None:
             self._render_ranking()
+        elif d.method == "Ranking":
+            self.tbl_res.clear(); self.tbl_res.setRowCount(0); self.tbl_res.setColumnCount(0)
         else:
             self.tbl_res.clear(); self.tbl_res.setRowCount(0); self.tbl_res.setColumnCount(0)
 

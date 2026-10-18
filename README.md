@@ -1,60 +1,58 @@
-# MCDM Results Visualizer
+# MCDMVisualStudio
 
-A desktop tool for visualizing final numeric DEMATEL and ranking results.
+Desktop app for visualizing final DEMATEL and MCDM ranking results, drawing freeform XY figures, and inspecting imported regression / SEM outputs.
 
-## Input formats
+## App tabs
 
-### DEMATEL INRM
+- **Data:** select the input type, import one workbook/CSV, choose an Excel worksheet when needed, and preview the imported values.
+- **Visual:** DEMATEL influence network, prominence–relation quadrants, influence heatmap, prominence ranking, and final ranking charts. Keep zoom while changing chart settings or chart type; use `+` / `−` and set tick spacing while the data determines the visible range. Manage colored `x=k` / `y=k` reference lines in one dialog. For DEMATEL networks, choose Cause and Effect marker shapes and colors. The chart legend is hidden by default; enable it, then manage or remove existing items and add your own descriptions. The **Arrows** panel sets each influence interval's opacity, line style, and color.
+- **XY Drawing:** separate blank XY canvas with a PowerPoint-style toolbar. Drag on the canvas to size rectangles, ellipses, triangles, and arrows; click to place a default-size shape. Type a label and click **Add text**, then drag the label to reposition it. Configure text background, border, and colors; double-click an object's name to rename it, or select it and press **Delete**. Use **Lock view**, `+`, and `−` to control the canvas.
+- **Quantitative Charts:** uses the data imported from **Data**; there is no second import button. Select Regression, CB-SEM, or PLS-SEM in Data, import the matching worksheet, and the corresponding analysis tab unlocks. Regression provides observed-vs-fitted, residuals-vs-fitted, and coefficient charts. CB-SEM and PLS-SEM provide path diagrams, coefficient charts, and imported metric charts.
 
-Import the **final total influence matrix T**. The first row contains factor names, the first column repeats those names in the same order, and the inside cells contain numeric influence values. Example layout:
+The quantitative charts visualize imported outputs. Regression's OLS line is calculated for visual diagnostics. CB-SEM and PLS-SEM models and measurement validity indices are not estimated by this application.
 
-|   | Factor A | Factor B | Factor C |
-|---|---:|---:|---:|
-| Factor A | 0.12 | 0.31 | 0.08 |
-| Factor B | 0.17 | 0.09 | 0.22 |
-| Factor C | 0.03 | 0.14 | 0.11 |
+## Data formats
 
-The app calculates `R` as row sums, `C` as column sums, prominence `R+C`, relation `R-C`, normalized prominence weight, rank, and Cause/Effect/Neutral group. It does not recalculate T from a direct or adjacency matrix.
+### DEMATEL
 
-### TOPSIS and other final ranking results
+Import the **final total influence matrix T**. The first row contains factor names, the first column repeats them in the same order, and inner cells contain numeric values. The app calculates R, C, R+C, R−C, normalized prominence weight `(R+C)/sum(R+C)`, rank, and cause/effect group.
 
-Import `.xlsx`, `.xls`, or `.csv` with alternatives in the first column and one or more numeric result columns after it. For example:
+### Ranking
 
-| Alternative | Closeness coefficient | Rank |
-|---|---:|---:|
-| A1 | 0.72 | 1 |
-| A2 | 0.48 | 3 |
-| A3 | 0.61 | 2 |
+Import alternatives in the first column and one or more numeric final score/rank columns after it. Lower-is-better defaults apply to rank, distance, cost, error, and loss metrics.
 
-Use the result-column selector to choose the score or rank to display. For `Rank`, distances to the positive ideal, cost, error, and loss columns, lower is better by default; score, closeness, weight, and distance-to-anti-ideal columns default to higher is better. You can change the direction manually. For method comparison, use one numeric score/rank column per method (for example, `TOPSIS`, `AHP`, `WASPAS`).
+### Regression
 
-## Charts
+Choose Regression in Data and import a sheet with numeric predictor X and observed Y columns. The preview stays in Data; choose the desired chart in the unlocked Regression page.
 
-- **DEMATEL:** INRM influence network, prominence–relation quadrants, total influence heatmap, and prominence ranking.
-- **Rankings:** score bars, lollipop, ranked dot plot, multi-metric profile, rank-change slope chart, and Spearman ρ / Kendall τ-b correlation heatmaps across result columns.
+### CB-SEM / PLS-SEM
 
-The INRM uses actual `R+C` and `R-C` coordinates. Each directed edge represents `T[i,j]` (factor i influences factor j). Configure increasing/decreasing axes, range padding, jitter, minimum influence, per-source Top-K, Top-N nodes, node size, arrowhead size, node shapes, weight-driven size/opacity, and weight labels. Toggle factor names and the `R-C = 0` and middle-prominence reference lines. The **Arrow intervals** tab lets you edit each influence bin's bounds, opacity (0–20), and dash style (0–20). Cause, effect, and neutral nodes use different symbols and colors. Reciprocal arrows curve to opposite sides. Hover a node or edge to inspect its values; click a node to highlight its incoming/outgoing links. Labels are auto-spaced and can be dragged; their positions remain until reset.
+Choose CB-SEM or PLS-SEM in Data and import a sheet with `Source`, `Target`, and numeric `Estimate` columns for a structural path diagram. For measurement/validity metric charts, use one row per metric with a text label and numeric value. Existing p-values, confidence intervals, alpha, CR, AVE, or HTMT values can remain in the workbook; this tool only plots supplied values.
 
-## Export
+## Template and demo files
 
-Select **Export figure** from the Visual tab. PNG export prompts for image width (800–8000 px) and uses a white background. SVG export preserves vector shapes and text for editing in illustration software. The export includes the current chart and title.
+- `Template/`: blank colored Excel input sheets.
+- `Demo Data/`: populated DEMATEL, ranking, regression, and SEM examples.
 
-## Run
+## Run from source
+
+Python 3.10 or newer is recommended.
 
 ```bash
 python -m pip install -r requirements.txt
 python -m app.main
 ```
 
-On Windows, run `setup_windows.bat` once, then `run_windows.bat`. This creates a project-local `.venv` so the app does not accidentally use another project's Python environment.
+On Windows, run `setup_windows.bat` once and then `run_windows.bat`.
 
-You can also run either command from the project folder; direct script launch also works from the `app` folder or via its full path:
+## Build Windows application
+
+Run `build_windows.bat`. It creates `.build-venv`, installs dependencies and PyInstaller, and generates an onedir application under `dist/MCDMVisualStudio/`. The PyInstaller spec packages `Template/` and `Demo Data/`.
+
+## Test
+
+The UI tests include drag-to-draw shapes and arrows, arrowhead geometry and color, text positioning and styling, object renaming/deletion, PNG/SVG rendering, legend/reference management, Cause/Effect marker settings, import-mode gating, axis panel sizing, and zoom retention while switching charts:
 
 ```bash
-python -m app.main
-python app/main.py
+QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v
 ```
-
-From the `app` folder, `python main.py` is supported too.
-
-Python 3.10 or newer is recommended.

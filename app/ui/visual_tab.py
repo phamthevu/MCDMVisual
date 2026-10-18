@@ -2,15 +2,15 @@ from __future__ import annotations
 import math
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph.exporters import ImageExporter, SVGExporter
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QGroupBox, QFormLayout,
     QComboBox, QCheckBox, QDoubleSpinBox, QSpinBox, QLabel, QPushButton,
     QFileDialog, QMessageBox, QInputDialog, QToolTip, QGraphicsItem,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QScrollArea)
+    QScrollArea, QDialog, QDialogButtonBox, QLineEdit, QColorDialog)
 from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QCursor, QFont
+from PySide6.QtGui import QCursor, QFont, QColor
 from app.core.ranking import pairwise_rank_correlations, directions_from_names
+from app.ui.exporting import export_plot_widget
 
 
 class DraggableLabel(pg.TextItem):
@@ -34,12 +34,15 @@ class VisualTab(QWidget):
         self.state = state
         root = QHBoxLayout(self)
         self.settings_tabs = QTabWidget()
-        self.settings_tabs.setMinimumWidth(350)
-        self.settings_tabs.setMaximumWidth(390)
+        self.settings_tabs.setMinimumWidth(290)
+        self.settings_tabs.setMaximumWidth(320)
         settings_page = QWidget()
         settings_layout = QVBoxLayout(settings_page)
         box = QGroupBox("Figure settings")
         form = QFormLayout(box)
+        self.lbl_note = QLabel("Choose a chart, then adjust its options. Tick spacing, reference lines and legend are under Axes and key.")
+        self.lbl_note.setWordWrap(True);self.lbl_note.setObjectName("visualHelp")
+        form.addRow(self.lbl_note)
         self.cb_chart = QComboBox()
         self.cb_chart.currentIndexChanged.connect(self.refresh_from_state)
         self.cb_metric = QComboBox()
@@ -59,32 +62,41 @@ class VisualTab(QWidget):
         self.sp_pad_x = QDoubleSpinBox(); self.sp_pad_x.setRange(.5, 5); self.sp_pad_x.setSingleStep(.1); self.sp_pad_x.setValue(1.0); self.sp_pad_x.valueChanged.connect(self.refresh_from_state)
         self.sp_pad_y = QDoubleSpinBox(); self.sp_pad_y.setRange(.5, 5); self.sp_pad_y.setSingleStep(.1); self.sp_pad_y.setValue(1.2); self.sp_pad_y.valueChanged.connect(self.refresh_from_state)
         self.sp_jitter = QDoubleSpinBox(); self.sp_jitter.setRange(0, .15); self.sp_jitter.setDecimals(3); self.sp_jitter.setSingleStep(.01); self.sp_jitter.setValue(0); self.sp_jitter.valueChanged.connect(self.refresh_from_state)
-        self.chk_arrows = QCheckBox("Show arrowheads"); self.chk_arrows.setChecked(True); self.chk_arrows.toggled.connect(self.refresh_from_state)
-        self.chk_labels = QCheckBox("Show factor-name labels"); self.chk_labels.setChecked(True); self.chk_labels.toggled.connect(self.refresh_from_state)
+        self.chk_arrows = QCheckBox("Arrows"); self.chk_arrows.setChecked(True); self.chk_arrows.setToolTip("Show arrowheads on influence links."); self.chk_arrows.toggled.connect(self.refresh_from_state)
+        self.chk_labels = QCheckBox("Labels"); self.chk_labels.setChecked(True); self.chk_labels.setToolTip("Show factor names beside chart nodes."); self.chk_labels.toggled.connect(self.refresh_from_state)
         self.chk_grid = QCheckBox("Grid"); self.chk_grid.setChecked(True); self.chk_grid.toggled.connect(self.refresh_from_state)
-        self.chk_line_rc0 = QCheckBox("Show R−C = 0 reference"); self.chk_line_rc0.setChecked(True); self.chk_line_rc0.toggled.connect(self.refresh_from_state)
-        self.chk_line_prom_mid = QCheckBox("Show mean R+C reference"); self.chk_line_prom_mid.setChecked(True); self.chk_line_prom_mid.toggled.connect(self.refresh_from_state)
-        self.cb_shape_cause = QComboBox(); self.cb_shape_cause.addItems(["Circle", "Square", "Triangle"]); self.cb_shape_cause.currentIndexChanged.connect(self.refresh_from_state)
-        self.cb_shape_effect = QComboBox(); self.cb_shape_effect.addItems(["Triangle", "Circle", "Square"]); self.cb_shape_effect.currentIndexChanged.connect(self.refresh_from_state)
-        self.chk_w_opacity = QCheckBox("Weight controls node opacity"); self.chk_w_opacity.toggled.connect(self.refresh_from_state)
-        self.chk_w_size = QCheckBox("Weight controls node size"); self.chk_w_size.setChecked(True); self.chk_w_size.toggled.connect(self.refresh_from_state)
-        self.chk_show_weight_labels = QCheckBox("Show weight beside factor label"); self.chk_show_weight_labels.toggled.connect(self.refresh_from_state)
+        self.chk_line_rc0 = QCheckBox("R−C = 0"); self.chk_line_rc0.setChecked(True); self.chk_line_rc0.setToolTip("Show the horizontal reference at R−C = 0."); self.chk_line_rc0.toggled.connect(self.refresh_from_state)
+        self.chk_line_prom_mid = QCheckBox("Mean R+C"); self.chk_line_prom_mid.setChecked(True); self.chk_line_prom_mid.setToolTip("Show the mean prominence reference line."); self.chk_line_prom_mid.toggled.connect(self.refresh_from_state)
+        shapes=["Circle","Square","Triangle","Diamond","Pentagon","Hexagon","Star","Plus","Cross"]
+        self.cb_shape_cause = QComboBox(); self.cb_shape_cause.addItems(shapes); self.cb_shape_cause.currentIndexChanged.connect(self.refresh_from_state)
+        self.cb_shape_effect = QComboBox(); self.cb_shape_effect.addItems(shapes); self.cb_shape_effect.setCurrentText("Triangle"); self.cb_shape_effect.currentIndexChanged.connect(self.refresh_from_state)
+        self.cause_color=QColor("#dc4646");self.effect_color=QColor("#3769be")
+        self.btn_cause_color=QPushButton("Color…");self.btn_cause_color.clicked.connect(lambda:self._choose_node_color("cause"))
+        self.btn_effect_color=QPushButton("Color…");self.btn_effect_color.clicked.connect(lambda:self._choose_node_color("effect"))
+        self.btn_cause_color.setStyleSheet("background:#dc4646;color:white")
+        self.btn_effect_color.setStyleSheet("background:#3769be;color:white")
+        self.chk_w_opacity = QCheckBox("W → opacity"); self.chk_w_opacity.setToolTip("Use factor weight to control node fill opacity."); self.chk_w_opacity.toggled.connect(self.refresh_from_state)
+        self.chk_w_size = QCheckBox("W → size"); self.chk_w_size.setChecked(True); self.chk_w_size.setToolTip("Use factor weight to control node size."); self.chk_w_size.toggled.connect(self.refresh_from_state)
+        self.chk_show_weight_labels = QCheckBox("Weight values"); self.chk_show_weight_labels.setToolTip("Show normalized weight beside each factor label."); self.chk_show_weight_labels.toggled.connect(self.refresh_from_state)
+        self.chk_show_rc_values = QCheckBox("R+C / R−C values"); self.chk_show_rc_values.setToolTip("Show prominence and relation values beside each factor label."); self.chk_show_rc_values.toggled.connect(self.refresh_from_state)
         self.ed_title = QComboBox(); self.ed_title.setEditable(True); self.ed_title.addItem(""); self.ed_title.setCurrentText(""); self.ed_title.currentTextChanged.connect(self.refresh_from_state)
         form.addRow("Chart", self.cb_chart)
-        form.addRow("Result column", self.cb_metric)
-        form.addRow("X axis (DEMATEL)", self.cb_x)
-        form.addRow("Y axis (DEMATEL)", self.cb_y)
-        form.addRow("Ranking direction", self.cb_direction)
-        form.addRow("Minimum influence", self.sp_min)
-        form.addRow("Top-K outgoing links", self.sp_topk)
-        form.addRow("Top-N nodes / alternatives", self.sp_topn)
+        form.addRow("Result", self.cb_metric)
+        form.addRow("X metric", self.cb_x)
+        form.addRow("Y metric", self.cb_y)
+        form.addRow("Direction", self.cb_direction)
+        form.addRow("Min influence", self.sp_min)
+        form.addRow("Top-K links", self.sp_topk)
+        form.addRow("Top-N items", self.sp_topn)
         form.addRow("Node size", self.sp_nodes)
-        form.addRow("Arrowhead size", self.sp_head)
-        form.addRow("X range padding", self.sp_pad_x)
-        form.addRow("Y range padding", self.sp_pad_y)
-        form.addRow("Scatter jitter", self.sp_jitter)
-        form.addRow("Cause node shape", self.cb_shape_cause)
-        form.addRow("Effect node shape", self.cb_shape_effect)
+        form.addRow("Arrow size", self.sp_head)
+        form.addRow("X padding", self.sp_pad_x)
+        form.addRow("Y padding", self.sp_pad_y)
+        form.addRow("Jitter", self.sp_jitter)
+        cause_row=self._pair_widget(self.cb_shape_cause,self.btn_cause_color)
+        effect_row=self._pair_widget(self.cb_shape_effect,self.btn_effect_color)
+        form.addRow("Cause", cause_row)
+        form.addRow("Effect", effect_row)
         form.addRow("", self.chk_arrows)
         form.addRow("", self.chk_labels)
         form.addRow("", self.chk_grid)
@@ -93,33 +105,68 @@ class VisualTab(QWidget):
         form.addRow("", self.chk_w_opacity)
         form.addRow("", self.chk_w_size)
         form.addRow("", self.chk_show_weight_labels)
-        form.addRow("Figure title", self.ed_title)
-        self.btn_export = QPushButton("Export figure…")
+        form.addRow("", self.chk_show_rc_values)
+        form.addRow("Title", self.ed_title)
+        self.btn_export = QPushButton("Export…")
         self.btn_export.clicked.connect(self.export_figure)
         form.addRow("", self.btn_export)
-        self.btn_reset_labels = QPushButton("Reset label positions")
+        self.btn_reset_labels = QPushButton("Reset labels")
         self.btn_reset_labels.clicked.connect(self.reset_label_positions)
         form.addRow("", self.btn_reset_labels)
-        self.btn_clear_focus = QPushButton("Clear factor focus")
+        self.btn_clear_focus = QPushButton("Clear focus")
         self.btn_clear_focus.clicked.connect(self.clear_factor_focus)
         form.addRow("", self.btn_clear_focus)
-        self.lbl_note = QLabel("Load a matrix or final numeric rankings in the Data tab.")
-        self.lbl_note.setWordWrap(True)
-        form.addRow("", self.lbl_note)
         settings_layout.addWidget(box)
         settings_scroll = QScrollArea(); settings_scroll.setWidgetResizable(True); settings_scroll.setWidget(settings_page)
+        settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        settings_page.setMinimumWidth(0); box.setMinimumWidth(0)
         self.settings_tabs.addTab(settings_scroll, "Visual options")
         bin_page = QWidget(); bin_layout = QVBoxLayout(bin_page)
-        bin_layout.addWidget(QLabel("Configure each influence interval: bounds, opacity (0–20), and dash style (0–20)."))
-        self.tbl_seg = QTableWidget(0, 4)
-        self.tbl_seg.setHorizontalHeaderLabels(["Lower", "Upper", "Opacity", "Dash"])
-        self.tbl_seg.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        bin_help=QLabel("Set each link interval's range, opacity, line style and color. Double-click a color cell to choose a color.");bin_help.setWordWrap(True);bin_layout.addWidget(bin_help)
+        self.tbl_seg = QTableWidget(0, 5)
+        self.tbl_seg.setHorizontalHeaderLabels(["Low", "High", "Opacity", "Dash", "Color"])
+        self.tbl_seg.setMinimumWidth(0);self.tbl_seg.setMaximumWidth(300)
+        self.tbl_seg.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tbl_seg.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for col,width in enumerate((54,54,56,42,70)):self.tbl_seg.setColumnWidth(col,width)
         self.tbl_seg.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_seg.itemChanged.connect(self._on_bin_table_changed)
+        self.tbl_seg.cellDoubleClicked.connect(self._choose_bin_color)
         bin_layout.addWidget(self.tbl_seg)
         self.lbl_edge_minmax = QLabel("Influence range: —"); bin_layout.addWidget(self.lbl_edge_minmax)
-        self.settings_tabs.addTab(bin_page, "Arrow intervals")
+        bin_page.setMinimumWidth(0)
+        bin_scroll=QScrollArea();bin_scroll.setWidgetResizable(True);bin_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff);bin_scroll.setWidget(bin_page)
+        self.settings_tabs.addTab(bin_scroll, "Arrows")
         root.addWidget(self.settings_tabs)
+
+        self.zoom_locked = True
+        self.custom_lines = []
+        self.legend_rows = []
+        self.legend_enabled=False
+        self.legend_suppressed=set()
+        self.legend_overrides={}
+        self.legend_extras=[]
+        self._legend_custom_seq=0
+        axis_box = QGroupBox("View, axes and legend")
+        axis_form = QFormLayout(axis_box)
+        self.zoom_lock = QCheckBox("Keep zoom"); self.zoom_lock.setChecked(True)
+        self.zoom_in = QPushButton("+"); self.zoom_out = QPushButton("−")
+        self.zoom_in.setMaximumWidth(40); self.zoom_out.setMaximumWidth(40)
+        zoom_row = QWidget(); zoom_lay = QHBoxLayout(zoom_row); zoom_lay.setContentsMargins(0,0,0,0)
+        zoom_lay.addWidget(self.zoom_lock); zoom_lay.addWidget(self.zoom_in); zoom_lay.addWidget(self.zoom_out)
+        axis_form.addRow("Zoom", zoom_row)
+        self.axis_tick = QDoubleSpinBox(); self.axis_tick.setRange(0, 1e9); self.axis_tick.setDecimals(6); self.axis_tick.setSpecialValueText("Auto")
+        self.axis_tick.setMinimumWidth(0)
+        self.axis_tick.setToolTip("Distance between adjacent tick marks on both axes. Set Auto to let the chart choose.")
+        axis_form.addRow("Tick step", self.axis_tick)
+        self.apply_axis_btn = QPushButton("Apply tick spacing"); self.apply_axis_btn.clicked.connect(self._apply_axis_controls); axis_form.addRow("", self.apply_axis_btn)
+        self.btn_manage_lines = QPushButton("Add / remove reference lines…"); self.btn_manage_lines.clicked.connect(self._manage_custom_lines);axis_form.addRow("Reference lines",self.btn_manage_lines)
+        self.chk_show_legend=QCheckBox("Show chart legend");self.chk_show_legend.setChecked(False);self.chk_show_legend.toggled.connect(self._on_legend_toggled);axis_form.addRow("Legend",self.chk_show_legend)
+        self.btn_legend_config = QPushButton("Manage legend items…"); self.btn_legend_config.clicked.connect(self._configure_legend); axis_form.addRow("", self.btn_legend_config)
+        self.lbl_axis_range = QLabel("Axis range: —"); self.lbl_axis_range.setWordWrap(True);self.lbl_axis_range.setMinimumWidth(0); axis_form.addRow("", self.lbl_axis_range)
+        axes_page=QWidget();axes_layout=QVBoxLayout(axes_page);axes_layout.setContentsMargins(5,5,5,5);axes_layout.addWidget(axis_box);axes_layout.addStretch(1)
+        axes_scroll=QScrollArea();axes_scroll.setWidgetResizable(True);axes_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff);axes_scroll.setWidget(axes_page)
+        self.settings_tabs.addTab(axes_scroll,"Axes and key")
 
         self.plot = pg.PlotWidget(background="w")
         self.plot.showGrid(x=True, y=True, alpha=.2)
@@ -135,8 +182,138 @@ class VisualTab(QWidget):
         self._chart_options = []
         self._metric_options = []
         self._last_view_key = None
+        self.zoom_in.clicked.connect(lambda: self.plot.getViewBox().scaleBy((.8, .8)))
+        self.zoom_out.clicked.connect(lambda: self.plot.getViewBox().scaleBy((1.25, 1.25)))
         self.plot.scene().sigMouseMoved.connect(self._on_plot_mouse_moved)
         self.refresh_from_state()
+
+    @staticmethod
+    def _pair_widget(first, second):
+        row = QWidget(); layout = QHBoxLayout(row); layout.setContentsMargins(0,0,0,0)
+        layout.addWidget(first); layout.addWidget(QLabel("to")); layout.addWidget(second)
+        return row
+
+    def _apply_axis_controls(self):
+        step = self.axis_tick.value()
+        for name, idx in (("bottom", 0), ("left", 1)):
+            axis = self.plot.getAxis(name)
+            if step <= 0:
+                axis.setTicks(None)
+                continue
+            low, high = self.plot.getViewBox().viewRange()[idx]
+            if not np.isfinite([low, high]).all() or high <= low: continue
+            safe_step = max(step, (high-low)/99)
+            first = np.ceil(low/safe_step)*safe_step
+            ticks = np.arange(first, high + safe_step*1e-9, safe_step)[:100]
+            axis.setTicks([[(float(v), f"{v:g}") for v in ticks]])
+
+    def _configure_legend(self):
+        dialog=QDialog(self);dialog.setWindowTitle("Manage chart legend");dialog.resize(680,430)
+        layout=QVBoxLayout(dialog);table=QTableWidget(0,4);table.setHorizontalHeaderLabels(["Object ID","Symbol","Name","Color"])
+        table.setColumnHidden(0,True);table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        defaults=self._default_legend_items(); visible={item[0]:item for item in defaults if item[0] not in self.legend_suppressed}
+        for item in self.legend_extras: visible[item[0]]=item
+        for ident,symbol,name,color,kind in visible.values():
+            row=table.rowCount();table.insertRow(row)
+            for col,value in enumerate((ident,symbol,name,color)):table.setItem(row,col,QTableWidgetItem(str(value)))
+        table.setToolTip("Edit names/symbols. Double-click a color cell to pick a color. Select and delete to remove an existing item.")
+        table.cellDoubleClicked.connect(lambda row,col:self._choose_legend_color(table,row,col,dialog))
+        layout.addWidget(QLabel("Manage the legend objects currently used by this chart; add independent explanatory items as needed."));layout.addWidget(table)
+        buttons=QHBoxLayout();add=QPushButton("Add legend item");remove=QPushButton("Delete selected item");buttons.addWidget(add);buttons.addWidget(remove);layout.addLayout(buttons)
+        add.clicked.connect(lambda:self._add_legend_row(table));remove.clicked.connect(lambda:table.removeRow(table.currentRow()) if table.currentRow()>=0 else None)
+        box=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel);layout.addWidget(box);box.accepted.connect(dialog.accept);box.rejected.connect(dialog.reject)
+        if dialog.exec()!=QDialog.DialogCode.Accepted:return
+        defaults_by_id={item[0]:item for item in defaults};new_overrides={};new_extras={};kept=set()
+        for row in range(table.rowCount()):
+            vals=[table.item(row,col).text().strip() if table.item(row,col) else "" for col in range(4)]
+            ident,symbol,name,color=vals
+            if not name:continue
+            if ident in defaults_by_id:
+                kept.add(ident);new_overrides[ident]=(symbol or defaults_by_id[ident][1],name,color or defaults_by_id[ident][3])
+            else:
+                ident=ident or f"custom:{self._legend_custom_seq}";self._legend_custom_seq+=not bool(vals[0])
+                new_extras[ident]=(ident,symbol or "Circle",name,color or "#334155","custom")
+        self.legend_suppressed=set(defaults_by_id)-kept;self.legend_overrides=new_overrides;self.legend_extras=list(new_extras.values())
+        self.refresh_from_state()
+
+    def _choose_legend_color(self,table,row,col,dialog):
+        if col!=3:return
+        cell=table.item(row,col)
+        color=QColorDialog.getColor(QColor(cell.text() if cell else "#334155"),dialog,"Legend item color")
+        if color.isValid():
+            if cell is None:cell=QTableWidgetItem();table.setItem(row,col,cell)
+            cell.setText(color.name())
+
+    @staticmethod
+    def _add_legend_row(table):
+        row=table.rowCount();table.insertRow(row)
+        for col,value in enumerate(("","Circle","New legend item","#334155")):
+            table.setItem(row,col,QTableWidgetItem(value))
+
+    def _default_legend_items(self):
+        if self.state.data.method!="DEMATEL" or self.cb_chart.currentText()!="INRM influence network":return []
+        items=[("base:cause",self.cb_shape_cause.currentText(),"Cause factor",self.cause_color.name(),"marker"),
+               ("base:effect",self.cb_shape_effect.currentText(),"Effect factor",self.effect_color.name(),"marker"),
+               ("base:neutral","Square","Neutral factor","#787878","marker")]
+        if self._bin_intervals:
+            for idx in sorted(set((0,len(self._bin_intervals)//2,len(self._bin_intervals)-1))):
+                low,high=self._bin_intervals[idx];style=self._bin_styles[idx]
+                items.append((f"base:interval:{idx}","Arrow",f"T={low:.3g}–{high:.3g} · Op {style['opacity']}/20",style.get("color","#64748b"),"arrow"))
+        return items
+
+    def _on_legend_toggled(self,enabled):
+        self.legend_enabled=bool(enabled);self.refresh_from_state()
+
+    def _choose_node_color(self,which):
+        attr="cause_color" if which=="cause" else "effect_color"
+        color=QColorDialog.getColor(getattr(self,attr),self,f"Choose {which} factor color")
+        if not color.isValid():return
+        setattr(self,attr,color)
+        button=self.btn_cause_color if which=="cause" else self.btn_effect_color
+        button.setStyleSheet(f"background:{color.name()};color:{'#fff' if color.lightness()<130 else '#172033'}")
+        self.refresh_from_state()
+
+    def _manage_custom_lines(self):
+        dialog=QDialog(self);dialog.setWindowTitle("Manage reference lines");layout=QVBoxLayout(dialog)
+        table=QTableWidget(len(self.custom_lines),4);table.setHorizontalHeaderLabels(["Axis","Value k","Label","Color"])
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        for row,line in enumerate(self.custom_lines):
+            axis,value,label,*color=line;color=color[0] if color else "#7c3aed"
+            for col,text in enumerate(("Horizontal y = k" if axis=="h" else "Vertical x = k",f"{value:g}",label,color)):table.setItem(row,col,QTableWidgetItem(text))
+        table.cellDoubleClicked.connect(lambda row,col:self._choose_legend_color(table,row,col,dialog) if col==3 else None)
+        layout.addWidget(QLabel("Add and edit horizontal or vertical reference lines. Select a row and remove it when no longer needed."));layout.addWidget(table)
+        buttons=QHBoxLayout();add=QPushButton("Add line");remove=QPushButton("Delete selected line");buttons.addWidget(add);buttons.addWidget(remove);layout.addLayout(buttons)
+        add.clicked.connect(lambda:self._add_reference_line_row(table))
+        remove.clicked.connect(lambda:table.removeRow(table.currentRow()) if table.currentRow()>=0 else None)
+        box=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel);layout.addWidget(box);box.accepted.connect(dialog.accept);box.rejected.connect(dialog.reject)
+        if dialog.exec()==QDialog.DialogCode.Accepted:
+            lines=[]
+            for row in range(table.rowCount()):
+                axis=table.item(row,0).text() if table.item(row,0) else "Horizontal y = k"
+                try:value=float(table.item(row,1).text())
+                except (ValueError,AttributeError):continue
+                label=table.item(row,2).text().strip() if table.item(row,2) else ""
+                color=table.item(row,3).text().strip() if table.item(row,3) else "#7c3aed"
+                lines.append(("h" if axis.startswith("Horizontal") else "v",value,label,color if QColor(color).isValid() else "#7c3aed"))
+            self.custom_lines=lines;self.refresh_from_state()
+
+    @staticmethod
+    def _add_reference_line_row(table):
+        row=table.rowCount();table.insertRow(row)
+        for col,value in enumerate(("Horizontal y = k","0","","#7c3aed")):table.setItem(row,col,QTableWidgetItem(value))
+
+    def _draw_custom_lines(self):
+        for line in self.custom_lines:
+            axis,value,label,*extra=line;color=extra[0] if extra else "#7c3aed"
+            if not QColor(color).isValid():color="#7c3aed"
+            angle = 0 if axis == "h" else 90
+            item = pg.InfiniteLine(pos=value, angle=angle, movable=True,
+                                   pen=pg.mkPen(color, width=1.5, style=Qt.PenStyle.DashLine))
+            self.plot.addItem(item)
+            if label:
+                text = pg.TextItem(label, color=color, anchor=(0, .5))
+                text.setPos(0, value) if axis == "h" else text.setPos(value, 0)
+                self.plot.addItem(text)
 
     def _sync_options(self):
         d = self.state.data
@@ -172,8 +349,8 @@ class VisualTab(QWidget):
         network = d.method == "DEMATEL" and self.cb_chart.currentText() == "INRM influence network"
         for w in (self.cb_x, self.cb_y, self.sp_min, self.sp_topk, self.sp_nodes, self.sp_head,
                   self.sp_pad_x, self.sp_pad_y, self.sp_jitter, self.chk_arrows,
-                  self.cb_shape_cause, self.cb_shape_effect, self.chk_w_opacity,
-                  self.chk_w_size, self.chk_show_weight_labels):
+                  self.cb_shape_cause, self.btn_cause_color, self.cb_shape_effect, self.btn_effect_color, self.chk_w_opacity,
+                  self.chk_w_size, self.chk_show_weight_labels, self.chk_show_rc_values):
             w.setEnabled(network)
         self.chk_line_rc0.setEnabled(d.method == "DEMATEL" and self.cb_chart.currentText() in ("INRM influence network", "Prominence–relation quadrants"))
         self.chk_line_prom_mid.setEnabled(d.method == "DEMATEL" and self.cb_chart.currentText() in ("INRM influence network", "Prominence–relation quadrants"))
@@ -195,12 +372,11 @@ class VisualTab(QWidget):
     def refresh_from_state(self, *args):
         self._sync_options()
         d = self.state.data
-        chart_key = (d.method, self.cb_chart.currentText(), id(d.matrix), id(d.ranking_values), tuple(d.labels), tuple(d.ranking_labels))
-        preserve_view = (
-            chart_key == self._last_view_key
-            and not (d.method == "DEMATEL" and self.cb_chart.currentText() in
-                     ("INRM influence network", "Prominence–relation quadrants"))
-        )
+        # Keep the same viewport while switching chart types and presentation
+        # options. A different method or imported dataset still auto-ranges.
+        chart_key = (d.method, id(d.matrix), id(d.ranking_values), tuple(d.labels), tuple(d.ranking_labels))
+        preserve_view = (self.zoom_lock.isChecked() and chart_key == self._last_view_key
+                         and self._last_view_key is not None)
         saved_view = self.plot.getViewBox().viewRange() if preserve_view else None
         # PlotWidget.clear() does not reliably clear LegendItem's internal
         # reference. Detach it explicitly so redraws cannot stack legends.
@@ -239,6 +415,8 @@ class VisualTab(QWidget):
             elif chart == "Spearman rank correlation": self._draw_rank_correlation("spearman")
             elif chart == "Kendall rank correlation": self._draw_rank_correlation("kendall")
             else: self._draw_ranking(chart)
+        self._draw_custom_lines()
+        self._draw_legend()
         if saved_view is not None:
             self.plot.setXRange(*saved_view[0], padding=0)
             self.plot.setYRange(*saved_view[1], padding=0)
@@ -246,6 +424,10 @@ class VisualTab(QWidget):
             self.plot.autoRange(padding=.08)
         title = self.ed_title.currentText().strip()
         self.plot.setTitle(title, color="#172033", size="12pt")
+        self._apply_axis_controls()
+        x_range, y_range = self.plot.getViewBox().viewRange()
+        tick_text = f" · tick {self.axis_tick.value():g}" if self.axis_tick.value() > 0 else " · tick auto"
+        self.lbl_axis_range.setText(f"X: {x_range[0]:.5g} to {x_range[1]:.5g} · Y: {y_range[0]:.5g} to {y_range[1]:.5g}{tick_text}")
         self._last_view_key = chart_key
 
     def clear_factor_focus(self):
@@ -347,7 +529,8 @@ class VisualTab(QWidget):
             for val, i, j in links: per_src.setdefault(i, []).append((val, i, j))
             links = [e for row in per_src.values() for e in row[:self.sp_topk.value()]]
         self._ensure_bin_table([e[0] for e in links] or mat[mat > 0])
-        node_colors = [(220, 70, 60, 225) if rel[i] > 1e-12 else (55, 105, 190, 225) if rel[i] < -1e-12 else (120, 120, 120, 225) for i in range(n)]
+        cause_rgb=QColor(self.cause_color).getRgb()[:3];effect_rgb=QColor(self.effect_color).getRgb()[:3]
+        node_colors = [(*cause_rgb,225) if rel[i] > 1e-12 else (*effect_rgb,225) if rel[i] < -1e-12 else (120, 120, 120, 225) for i in range(n)]
         scale = weights[keep]; denom = max(float(np.ptp(scale)), 1e-12)
         sizes = {int(i): (11 + 13 * (weights[i] - scale.min()) / denom if self.chk_w_size.isChecked() else float(self.sp_nodes.value())) for i in keep}
         xr, yr = self._padded_range(x[keep], self.sp_pad_x.value()), self._padded_range(y[keep], self.sp_pad_y.value())
@@ -379,6 +562,9 @@ class VisualTab(QWidget):
         if self.chk_labels.isChecked():
             for order, i in enumerate(keep):
                 label = d.labels[i] + (f"  W={weights[i]:.3g}" if self.chk_show_weight_labels.isChecked() else "")
+                if self.chk_show_rc_values.isChecked():
+                    row = d.dematel_table[i]
+                    label += f"  R+C={row['R+C']:.3g} · R−C={row['R-C']:.3g}"
                 self._add_node_label(label, x[i], y[i], order, key=d.labels[i])
         self._add_reference_lines(x[keep], y[keep], self.cb_x.currentText(), self.cb_y.currentText())
         self.plot.setLabel("left", self._axis_label(self.cb_y.currentText()))
@@ -387,7 +573,6 @@ class VisualTab(QWidget):
             self.lbl_note.setText(f"Focused: {d.labels[self._selected_idx]} · orange arrows go out; blue arrows point in. Click the node or Clear factor focus to reset.")
         else:
             self.lbl_note.setText(f"{len(keep)} nodes · {len(links)} links. Reciprocal links curve apart. Click a node to focus its in/out links.")
-        self._add_network_legend(edge_max)
 
     @staticmethod
     def _nice_range(arr):
@@ -412,7 +597,8 @@ class VisualTab(QWidget):
 
     @staticmethod
     def _shape_symbol(shape):
-        return {"Circle": "o", "Square": "s", "Triangle": "t"}.get(shape, "o")
+        return {"Circle":"o","Square":"s","Triangle":"t","Diamond":"d","Pentagon":"p",
+                "Hexagon":"h","Star":"star","Plus":"+","Cross":"x"}.get(shape,"o")
 
     def _add_reference_lines(self, x, y, x_choice, y_choice):
         p, rel, _ = self._dematel_arrays()
@@ -443,11 +629,16 @@ class VisualTab(QWidget):
             self._bin_signature = signature
             self._bin_edges = edges
             self._bin_intervals = list(zip(edges[:-1], edges[1:]))
-            self._bin_styles = [{"opacity": 2 if row < count-1 else 6, "dash": 0} for row in range(count)]
+            self._bin_styles = []
+            for row in range(count):
+                mix=row/max(1,count-1)
+                color=QColor(int(175-120*mix),int(190-120*mix),int(205-105*mix)).name()
+                self._bin_styles.append({"opacity":2 if row<count-1 else 6,"dash":0,"color":color})
             self.tbl_seg.blockSignals(True); self.tbl_seg.setRowCount(count)
             for row in range(count):
-                for col, value in enumerate((edges[row], edges[row+1], self._bin_styles[row]["opacity"], 0)):
+                for col, value in enumerate((edges[row], edges[row+1], self._bin_styles[row]["opacity"], 0,self._bin_styles[row]["color"])):
                     item = QTableWidgetItem(f"{value:.6g}" if col < 2 else str(value))
+                    if col==4:item.setBackground(QColor(value))
                     self.tbl_seg.setItem(row, col, item)
             self.tbl_seg.blockSignals(False)
         else:
@@ -481,14 +672,32 @@ class VisualTab(QWidget):
             except (AttributeError,ValueError): op=14
             try: dash=int(float(self.tbl_seg.item(row,3).text()))
             except (AttributeError,ValueError): dash=0
-            styles.append({"opacity": max(0,min(20,op)), "dash": max(0,min(20,dash))})
+            color_item=self.tbl_seg.item(row,4);color=color_item.text().strip() if color_item else "#64748b"
+            if not QColor(color).isValid():color="#64748b"
+            styles.append({"opacity": max(0,min(20,op)), "dash": max(0,min(20,dash)),"color":QColor(color).name()})
         return styles
 
+    def _choose_bin_color(self,row,column):
+        if column!=4:return
+        item=self.tbl_seg.item(row,column)
+        initial=QColor(item.text()) if item and QColor(item.text()).isValid() else QColor("#64748b")
+        color=QColorDialog.getColor(initial,self,"Influence link color")
+        if not color.isValid():return
+        self.tbl_seg.blockSignals(True)
+        if item is None:item=QTableWidgetItem();self.tbl_seg.setItem(row,column,item)
+        item.setText(color.name());item.setBackground(color)
+        self.tbl_seg.blockSignals(False)
+        self._bin_styles=self._read_table_styles();self.refresh_from_state()
+
     def _on_bin_table_changed(self, item):
-        if item.column() >= 2:
+        if item.column() in (2,3):
             try: value=max(0,min(20,int(float(item.text()))))
             except ValueError: value=14 if item.column()==2 else 0
             self.tbl_seg.blockSignals(True); item.setText(str(value)); self.tbl_seg.blockSignals(False)
+        elif item.column()==4:
+            color=QColor(item.text())
+            if not color.isValid():color=QColor("#64748b")
+            self.tbl_seg.blockSignals(True);item.setText(color.name());item.setBackground(color);self.tbl_seg.blockSignals(False)
         intervals=self._read_table_intervals()
         if len(intervals) == self.tbl_seg.rowCount(): self._bin_intervals=intervals
         self._bin_styles=self._read_table_styles()
@@ -520,7 +729,7 @@ class VisualTab(QWidget):
         strength = min(1.0, max(0.0, value / max(edge_max, 1e-12)))
         alpha=int(round(12 + (style["opacity"] / 20.0) * 228))
         width=1.0 + (style["opacity"] / 20.0) * 1.4
-        rgb = self._edge_rgb(value)
+        rgb = QColor(style.get("color",pg.mkColor(self._edge_rgb(value)).name())).getRgb()[:3]
         if self._selected_idx is not None:
             if i == self._selected_idx: rgb=(225,92,40)
             elif j == self._selected_idx: rgb=(20,125,190)
@@ -548,7 +757,8 @@ class VisualTab(QWidget):
         self.plot.setYRange(*self._nice_range(rel[keep]),padding=.12)
         vb=self.plot.getViewBox()
         self._label_node_centers=[(d.labels[int(i)],vb.mapViewToScene(pg.Point(float(p[i]),float(rel[i]))),12.0) for i in keep]
-        colors=[(220,70,60,230) if rel[i]>1e-12 else (55,105,190,230) if rel[i]<-1e-12 else (120,120,120,230) for i in keep]
+        cause_rgb=QColor(self.cause_color).getRgb()[:3];effect_rgb=QColor(self.effect_color).getRgb()[:3]
+        colors=[(*cause_rgb,230) if rel[i]>1e-12 else (*effect_rgb,230) if rel[i]<-1e-12 else (120,120,120,230) for i in keep]
         sizes=9+np.divide(weights[keep]-weights[keep].min(),max(float(np.ptp(weights[keep])),1e-12))*10
         self.plot.addItem(pg.ScatterPlotItem(x=p[keep],y=rel[keep],size=sizes,brush=colors,pen=pg.mkPen("#263445",width=.7)))
         self.plot.addItem(pg.InfiniteLine(pos=0,angle=0,pen=pg.mkPen("#4b5563",width=1)))
@@ -599,25 +809,25 @@ class VisualTab(QWidget):
         if label_key in positions:
             self._placed_label_rects.append(label.sceneBoundingRect().adjusted(-3,-2,3,2))
 
-    def _add_network_legend(self, edge_max):
-        self._legend=self.plot.addLegend(offset=(10,10))
-        self._legend.setBrush(pg.mkBrush(255, 255, 255, 245))
-        self._legend.setPen(pg.mkPen(190, 198, 208, 220, width=1))
-        cause=pg.ScatterPlotItem([],[],symbol="o",size=9,brush=(220,70,60),pen=pg.mkPen("#263445"))
-        effect=pg.ScatterPlotItem([],[],symbol="t",size=9,brush=(55,105,190),pen=pg.mkPen("#263445"))
-        neutral=pg.ScatterPlotItem([],[],symbol="s",size=8,brush=(120,120,120),pen=pg.mkPen("#263445"))
-        self._legend.addItem(cause,"Cause factor"); self._legend.addItem(effect,"Effect factor")
-        self._legend.addItem(neutral,"Neutral factor")
-        if self._bin_intervals:
-            sample_indices=sorted(set((0, len(self._bin_intervals)//2, len(self._bin_intervals)-1)))
-            for idx in sample_indices:
-                low,high=self._bin_intervals[idx]; style=self._bin_styles[idx]
-                value=(low+high)/2; rgb=self._edge_rgb(value)
-                alpha=int(round(12+(style["opacity"]/20)*228)); width=1+(style["opacity"]/20)*1.4
-                dash=style["dash"]
-                dash_style=Qt.PenStyle.SolidLine if dash<=0 else Qt.PenStyle.DashLine if dash<=7 else Qt.PenStyle.DotLine if dash<=14 else Qt.PenStyle.DashDotLine
-                sample=pg.PlotDataItem([],[],pen=pg.mkPen(color=(*rgb,alpha),width=width,style=dash_style))
-                self._legend.addItem(sample,f"T={low:.3g}–{high:.3g} · Op {style['opacity']}/20")
+    def _draw_legend(self):
+        if not self.chk_show_legend.isChecked():return
+        defaults={item[0]:item for item in self._default_legend_items()}
+        entries=[]
+        for ident,item in defaults.items():
+            if ident in self.legend_suppressed:continue
+            symbol,name,color,kind=item[1:]
+            symbol,name,color=self.legend_overrides.get(ident,(symbol,name,color))
+            entries.append((symbol,name,color,kind))
+        entries.extend((item[1],item[2],item[3],item[4]) for item in self.legend_extras)
+        if not entries:return
+        legend=self.plot.addLegend(offset=(10,10));legend.setBrush(pg.mkBrush(255,255,255,245));legend.setPen(pg.mkPen(190,198,208,220,width=1));self._legend=legend
+        for symbol,name,color,kind in entries:
+            color=color if QColor(color).isValid() else "#334155"
+            if kind=="arrow" or "arrow" in symbol.lower():sample=pg.PlotDataItem([],[],pen=pg.mkPen(color,width=2))
+            else:
+                mark=self._shape_symbol(symbol) if symbol in ("Circle","Square","Triangle","Diamond","Pentagon","Hexagon","Star","Plus","Cross") else "o"
+                sample=pg.ScatterPlotItem([],[],symbol=mark,size=9,brush=color,pen=pg.mkPen(color))
+            legend.addItem(sample,name or symbol)
 
     def _edge_rgb(self, value):
         n_bins=max(1,len(self._bin_intervals))
@@ -739,16 +949,13 @@ class VisualTab(QWidget):
             if is_svg:
                 if path.lower().endswith(".png"): path = path[:-4]
                 if not path.lower().endswith(".svg"): path += ".svg"
-                exp=SVGExporter(self.plot.plotItem); exp.export(path)
+                export_plot_widget(self.plot,path,vector=True)
             else:
                 if path.lower().endswith(".svg"): path = path[:-4]
                 if not path.lower().endswith(".png"): path += ".png"
-                exp=ImageExporter(self.plot.plotItem)
                 width,ok=QInputDialog.getInt(self,"PNG export","Image width (pixels)",2400,800,8000,200)
                 if not ok:return
-                exp.parameters()["width"]=width
-                exp.parameters()["background"]="w"
-                exp.export(path)
+                export_plot_widget(self.plot,path,vector=False,width=width)
             QMessageBox.information(self,"Export complete",f"Figure saved to:\n{path}")
         except Exception as exc:
             QMessageBox.critical(self,"Export failed",str(exc))

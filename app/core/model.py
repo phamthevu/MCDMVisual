@@ -10,6 +10,8 @@ class VisualParams:
 @dataclass
 class AppData:
     method: str = "DEMATEL"
+    quant_type: str = ""
+    quant_frame: object | None = None
     matrix: np.ndarray | None = None
     labels: list[str] = field(default_factory=list)
     ranking_labels: list[str] = field(default_factory=list)
